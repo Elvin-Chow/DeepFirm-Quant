@@ -1,20 +1,33 @@
 "use client";
 
+import { useTheme } from "@/hooks/useTheme";
 import { OptimizationResult } from "@/types/api";
 import { t, Lang } from "@/lib/i18n";
+import GlassCard from "@/components/ui/GlassCard";
+import SectionHeader from "@/components/ui/SectionHeader";
+import Loading from "@/components/ui/Loading";
+import EmptyState from "@/components/ui/EmptyState";
+import ThemedTooltip from "@/components/charts/ThemedTooltip";
 import {
-  CartesianGrid,
-  Cell,
-  Legend,
-  Line,
-  LineChart,
-  Pie,
   PieChart,
-  ResponsiveContainer,
-  Tooltip,
+  Pie,
+  Cell,
+  LineChart,
+  Line,
+  CartesianGrid,
   XAxis,
   YAxis,
+  ResponsiveContainer,
+  Legend,
 } from "recharts";
+import {
+  PieChart as PieChartIcon,
+  ArrowLeftRight,
+  FlaskConical,
+  Star,
+  TrendingUp,
+  Award,
+} from "lucide-react";
 
 interface DecisionTabProps {
   data: OptimizationResult | null;
@@ -23,6 +36,9 @@ interface DecisionTabProps {
 }
 
 export default function DecisionTab({ data, loading, lang }: DecisionTabProps) {
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+
   if (loading) return <Loading />;
   if (!data) return <EmptyState text={t(lang, "emptyDecision")} />;
 
@@ -35,7 +51,14 @@ export default function DecisionTab({ data, loading, lang }: DecisionTabProps) {
     value: Math.round((data.posterior_weights[i] ?? 0) * 100),
   }));
 
-  const COLORS = ["#66fcf1", "#45a29e", "#ff6b6b", "#f7b731", "#5f27cd", "#10ac84"];
+  const COLORS = [
+    isDark ? "#66fcf1" : "#d97706",
+    isDark ? "#45a29e" : "#e11d48",
+    isDark ? "#ff6b6b" : "#16a34a",
+    isDark ? "#f7b731" : "#7c3aed",
+    isDark ? "#5f27cd" : "#db2777",
+    isDark ? "#10ac84" : "#2563eb",
+  ];
 
   const backtestChartData = data.backtest_enabled
     ? data.oos_dates.map((date, i) => ({
@@ -45,12 +68,16 @@ export default function DecisionTab({ data, loading, lang }: DecisionTabProps) {
       }))
     : [];
 
+  const gridColor = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)";
+  const axisColor = isDark ? "#a1a1aa" : "#57534e";
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-df-surface border border-df-accent-dim/20 rounded-lg p-4">
-          <h3 className="text-df-accent text-sm font-semibold mb-3">{t(lang, "priorWeights")}</h3>
-          <div className="h-56">
+      {/* Prior / Posterior Pie Charts */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <GlassCard>
+          <SectionHeader icon={PieChartIcon} title={t(lang, "priorWeights")} />
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -61,35 +88,25 @@ export default function DecisionTab({ data, loading, lang }: DecisionTabProps) {
                   cy="50%"
                   innerRadius={50}
                   outerRadius={80}
-                  stroke="#0b0c10"
+                  stroke={isDark ? "#0b0c10" : "#fffdfa"}
                   strokeWidth={2}
                 >
                   {priorPieData.map((_, i) => (
                     <Cell key={`prior-${i}`} fill={COLORS[i % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#1f2833",
-                    border: "1px solid #45a29e",
-                    borderRadius: 6,
-                    fontSize: 12,
-                  }}
-                  labelStyle={{ color: "#66fcf1" }}
-                  itemStyle={{ color: "#c5c6c7" }}
-                  formatter={(value: any, name: any) => [`${value}%`, name]}
-                />
+                <ThemedTooltip formatter={(value: any, name: any) => [`${value}%`, name]} />
                 <Legend
-                  wrapperStyle={{ fontSize: 11, color: "#c5c6c7" }}
+                  wrapperStyle={{ fontSize: 11, color: axisColor }}
                 />
               </PieChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </GlassCard>
 
-        <div className="bg-df-surface border border-df-accent-dim/20 rounded-lg p-4">
-          <h3 className="text-df-accent text-sm font-semibold mb-3">{t(lang, "posteriorWeights")}</h3>
-          <div className="h-56">
+        <GlassCard>
+          <SectionHeader icon={PieChartIcon} title={t(lang, "posteriorWeights")} />
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -100,107 +117,101 @@ export default function DecisionTab({ data, loading, lang }: DecisionTabProps) {
                   cy="50%"
                   innerRadius={50}
                   outerRadius={80}
-                  stroke="#0b0c10"
+                  stroke={isDark ? "#0b0c10" : "#fffdfa"}
                   strokeWidth={2}
                 >
                   {postPieData.map((_, i) => (
                     <Cell key={`post-${i}`} fill={COLORS[i % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#1f2833",
-                    border: "1px solid #45a29e",
-                    borderRadius: 6,
-                    fontSize: 12,
-                  }}
-                  labelStyle={{ color: "#66fcf1" }}
-                  itemStyle={{ color: "#c5c6c7" }}
-                  formatter={(value: any, name: any) => [`${value}%`, name]}
-                />
+                <ThemedTooltip formatter={(value: any, name: any) => [`${value}%`, name]} />
                 <Legend
-                  wrapperStyle={{ fontSize: 11, color: "#c5c6c7" }}
+                  wrapperStyle={{ fontSize: 11, color: axisColor }}
                 />
               </PieChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </GlassCard>
       </div>
 
-      <div className="bg-df-surface border border-df-accent-dim/20 rounded-lg p-4">
-        <h3 className="text-df-accent text-sm font-semibold mb-3">{t(lang, "weightShift")}</h3>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-df-text/70 border-b border-df-accent-dim/20">
-              <th className="text-left py-2">{t(lang, "factor")}</th>
-              <th className="text-right py-2">{t(lang, "prior")}</th>
-              <th className="text-right py-2">{t(lang, "posterior")}</th>
-              <th className="text-right py-2">{t(lang, "shift")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.tickers.map((ticker, i) => {
-              const prior = data.prior_weights[i] ?? 0;
-              const post = data.posterior_weights[i] ?? 0;
-              const shift = post - prior;
-              return (
-                <tr key={ticker} className="border-b border-df-accent-dim/10">
-                  <td className="py-2">{ticker}</td>
-                  <td className="text-right py-2">{(prior * 100).toFixed(1)}%</td>
-                  <td className="text-right py-2">{(post * 100).toFixed(1)}%</td>
-                  <td
-                    className={`text-right py-2 font-medium ${
-                      shift > 0 ? "text-green-400" : shift < 0 ? "text-df-danger" : "text-df-text"
-                    }`}
+      {/* Weight Shift Table */}
+      <GlassCard>
+        <SectionHeader icon={ArrowLeftRight} title={t(lang, "weightShift")} />
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-df-text-secondary border-b border-df-border">
+                <th className="text-left py-3 px-2">{t(lang, "factor")}</th>
+                <th className="text-right py-3 px-2">{t(lang, "prior")}</th>
+                <th className="text-right py-3 px-2">{t(lang, "posterior")}</th>
+                <th className="text-right py-3 px-2">{t(lang, "shift")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.tickers.map((ticker, i) => {
+                const prior = data.prior_weights[i] ?? 0;
+                const post = data.posterior_weights[i] ?? 0;
+                const shift = post - prior;
+                return (
+                  <tr
+                    key={ticker}
+                    className="border-b border-df-border/50 hover:bg-df-surface-solid/20 transition-colors"
                   >
-                    {shift > 0 ? "+" : ""}
-                    {(shift * 100).toFixed(1)}%
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                    <td className="py-3 px-2 font-medium">{ticker}</td>
+                    <td className="text-right py-3 px-2 font-mono">
+                      {(prior * 100).toFixed(1)}%
+                    </td>
+                    <td className="text-right py-3 px-2 font-mono">
+                      {(post * 100).toFixed(1)}%
+                    </td>
+                    <td
+                      className={`text-right py-3 px-2 font-mono font-bold ${
+                        shift > 0
+                          ? "text-green-500"
+                          : shift < 0
+                          ? "text-df-danger"
+                          : "text-df-text-secondary"
+                      }`}
+                    >
+                      {shift > 0 ? "+" : ""}
+                      {(shift * 100).toFixed(1)}%
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </GlassCard>
 
+      {/* Backtest */}
       {data.backtest_enabled && (
-        <div className="bg-df-surface border border-df-accent-dim/20 rounded-lg p-4">
-          <h3 className="text-df-accent text-sm font-semibold mb-3">
-            {t(lang, "oosBacktest")}
-          </h3>
-          <div className="h-72 mb-4">
+        <GlassCard>
+          <SectionHeader icon={FlaskConical} title={t(lang, "oosBacktest")} />
+          <div className="h-72 mb-6">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={backtestChartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2833" />
+                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
                 <XAxis
                   dataKey="date"
-                  tick={{ fill: "#c5c6c7", fontSize: 10 }}
+                  tick={{ fill: axisColor, fontSize: 10 }}
                   tickLine={false}
-                  axisLine={{ stroke: "#1f2833" }}
+                  axisLine={{ stroke: gridColor }}
                   minTickGap={30}
                 />
                 <YAxis
-                  tick={{ fill: "#c5c6c7", fontSize: 10 }}
+                  tick={{ fill: axisColor, fontSize: 10 }}
                   tickLine={false}
-                  axisLine={{ stroke: "#1f2833" }}
+                  axisLine={{ stroke: gridColor }}
                   tickFormatter={(v: string) => `${v}%`}
                 />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#1f2833",
-                    border: "1px solid #45a29e",
-                    borderRadius: 6,
-                    fontSize: 12,
-                  }}
-                  labelStyle={{ color: "#66fcf1" }}
-                  itemStyle={{ color: "#c5c6c7" }}
-                />
-                <Legend wrapperStyle={{ fontSize: 11, color: "#c5c6c7" }} />
+                <ThemedTooltip />
+                <Legend wrapperStyle={{ fontSize: 11, color: axisColor }} />
                 <Line
                   type="monotone"
                   dataKey="optimized"
                   name={t(lang, "optimizedPortfolio")}
-                  stroke="#66fcf1"
+                  stroke={isDark ? "#66fcf1" : "#d97706"}
                   strokeWidth={2}
                   dot={false}
                 />
@@ -208,7 +219,7 @@ export default function DecisionTab({ data, loading, lang }: DecisionTabProps) {
                   type="monotone"
                   dataKey="benchmark"
                   name={t(lang, "benchmark")}
-                  stroke="#ff6b6b"
+                  stroke={isDark ? "#ff6b6b" : "#e11d48"}
                   strokeWidth={2}
                   dot={false}
                   strokeDasharray="5 5"
@@ -216,50 +227,50 @@ export default function DecisionTab({ data, loading, lang }: DecisionTabProps) {
               </LineChart>
             </ResponsiveContainer>
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            <MetricCard label={t(lang, "modelScore")} value={`${data.model_score.toFixed(0)} / 100`} accent />
-            <MetricCard label={t(lang, "grade")} value={data.model_grade} accent />
-            <MetricCard label={t(lang, "sharpe")} value={data.oos_optimized_sharpe.toFixed(2)} />
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="glass-card p-4 text-center">
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <Star size={16} className="text-df-accent" />
+                <span className="text-xs text-df-text-secondary">
+                  {t(lang, "modelScore")}
+                </span>
+              </div>
+              <div className="text-2xl font-bold gradient-text bg-gradient-to-r from-df-accent to-df-accent-secondary">
+                {data.model_score.toFixed(0)} / 100
+              </div>
+            </div>
+
+            <div className="glass-card p-4 text-center">
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <Award size={16} className="text-df-accent" />
+                <span className="text-xs text-df-text-secondary">
+                  {t(lang, "grade")}
+                </span>
+              </div>
+              <div className="text-3xl font-serif font-bold gradient-text bg-gradient-to-r from-df-accent to-df-accent-secondary">
+                {data.model_grade}
+              </div>
+            </div>
+
+            <div className="glass-card p-4 text-center">
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <TrendingUp size={16} className="text-df-accent" />
+                <span className="text-xs text-df-text-secondary">
+                  {t(lang, "sharpe")}
+                </span>
+              </div>
+              <div className="text-2xl font-bold text-df-text">
+                {data.oos_optimized_sharpe.toFixed(2)}
+              </div>
+            </div>
           </div>
-        </div>
+        </GlassCard>
       )}
 
-      <div className="text-xs text-df-text/50">{t(lang, "dataSource")}: {data.source}</div>
-    </div>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-}) {
-  return (
-    <div className="bg-df-bg/50 border border-df-accent-dim/10 rounded-lg p-3 text-center">
-      <div className="text-xs text-df-text/70 mb-1">{label}</div>
-      <div className={`text-lg font-bold ${accent ? "text-df-accent" : "text-white"}`}>
-        {value}
+      <div className="text-xs text-df-text-secondary/60">
+        {t(lang, "dataSource")}: {data.source}
       </div>
-    </div>
-  );
-}
-
-function Loading() {
-  return (
-    <div className="flex items-center justify-center h-64">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-df-accent" />
-    </div>
-  );
-}
-
-function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="flex items-center justify-center h-64 text-df-text/40 text-sm">
-      {text}
     </div>
   );
 }

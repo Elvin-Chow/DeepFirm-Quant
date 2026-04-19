@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { Shield, TrendingUp, Scale, Sparkles, Menu, X } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import RiskTab from "@/components/RiskTab";
 import AlphaTab from "@/components/AlphaTab";
 import DecisionTab from "@/components/DecisionTab";
+import WelcomeTab from "@/components/WelcomeTab";
 import { postApi } from "@/hooks/useApi";
 import { useLanguage } from "@/hooks/useLanguage";
 import { usePresets, type Preset } from "@/hooks/usePresets";
@@ -18,7 +20,7 @@ import {
 } from "@/types/api";
 import { t } from "@/lib/i18n";
 
-type TabKey = "risk" | "alpha" | "decision";
+type TabKey = "welcome" | "risk" | "alpha" | "decision";
 
 function computeDateRange(window: string): { start: string; end: string } {
   const end = new Date();
@@ -51,7 +53,8 @@ export default function Home() {
   const { lang, setLang } = useLanguage();
   const { presets, addPreset, removePreset } = usePresets();
 
-  const [activeTab, setActiveTab] = useState<TabKey>("risk");
+  const [activeTab, setActiveTab] = useState<TabKey>("welcome");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [tickers, setTickers] = useState("AAPL,MSFT");
   const [market, setMarket] = useState("us");
@@ -61,7 +64,7 @@ export default function Home() {
   const [leverage, setLeverage] = useState(1.0);
   const [mcPaths, setMcPaths] = useState(10_000);
   const [maxWeight, setMaxWeight] = useState(0.40);
-  const [backtestEnabled, setBacktestEnabled] = useState(false);
+  const [backtestEnabled, setBacktestEnabled] = useState(true);
   const [testRatio, setTestRatio] = useState(0.20);
 
   const [viewTicker, setViewTicker] = useState("");
@@ -80,6 +83,7 @@ export default function Home() {
   const handleRun = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setActiveTab("risk");
 
     const tickerList = tickers.split(",").map((t) => t.trim()).filter(Boolean);
     if (tickerList.length === 0) {
@@ -98,8 +102,8 @@ export default function Home() {
     const views = viewTicker
       ? [
           {
-            ticker: viewTicker,
-            relative: viewRelative || undefined,
+            assets: [viewTicker],
+            relative_assets: viewRelative ? [viewRelative] : undefined,
             expected_return: viewReturn,
             confidence: viewConfidence,
           },
@@ -202,10 +206,11 @@ export default function Home() {
     setApiKey(preset.apiKey);
   }, []);
 
-  const tabs: { key: TabKey; label: string }[] = [
-    { key: "risk", label: t(lang, "risk") },
-    { key: "alpha", label: t(lang, "alpha") },
-    { key: "decision", label: t(lang, "decision") },
+  const tabs: { key: TabKey; label: string; icon: React.ElementType }[] = [
+    { key: "welcome", label: t(lang, "welcome"), icon: Sparkles },
+    { key: "risk", label: t(lang, "risk"), icon: Shield },
+    { key: "alpha", label: t(lang, "alpha"), icon: TrendingUp },
+    { key: "decision", label: t(lang, "decision"), icon: Scale },
   ];
 
   return (
@@ -250,33 +255,78 @@ export default function Home() {
         onSavePreset={handleSavePreset}
         onLoadPreset={handleLoadPreset}
         onDeletePreset={removePreset}
+        onDismissError={() => setError(null)}
+        mobileOpen={sidebarOpen}
+        onCloseMobile={() => setSidebarOpen(false)}
       />
 
-      <main className="flex-1 p-6 overflow-y-auto">
-        <h1 className="text-2xl font-bold text-df-accent mb-2">DeepFirm Quant</h1>
-        <p className="text-sm text-df-text/60 mb-6">
-          {t(lang, "subtitle")}
-        </p>
+      {/* Mobile overlay mask */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
 
-        <div className="flex gap-1 mb-6 border-b border-df-accent-dim/20">
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setActiveTab(t.key)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === t.key
-                  ? "border-df-accent text-df-accent"
-                  : "border-transparent text-df-text/60 hover:text-df-text"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+        <div className="max-w-7xl mx-auto page-fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+            <div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSidebarOpen(true)}
+                  className="lg:hidden p-2 rounded-xl bg-df-surface border border-df-border text-df-text hover:text-df-accent transition-colors click-press"
+                  aria-label="Open menu"
+                >
+                  <Menu size={20} />
+                </button>
+                <h1 className="text-2xl sm:text-3xl font-serif font-bold gradient-text bg-gradient-to-r from-df-accent to-df-accent-secondary">
+                  DeepFirm Quant
+                </h1>
+              </div>
+              <p className="text-sm text-df-text-secondary mt-1">
+                {t(lang, "subtitle")}
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveTab(tab.key)}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-medium transition-all click-press ${
+                      isActive
+                        ? "bg-gradient-to-r from-df-accent to-df-accent-secondary text-white shadow-lg"
+                        : "bg-df-surface border border-df-border text-df-text-secondary hover:text-df-text hover-lift"
+                    }`}
+                  >
+                    <Icon size={16} />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {loading && (
+            <div className="mb-4">
+              <div className="flex items-center justify-between text-xs text-df-text-secondary mb-1.5">
+                <span className="font-medium">{t(lang, "analyzing")}</span>
+              </div>
+              <div className="h-1.5 w-full bg-df-surface-solid/30 rounded-full overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-df-accent to-df-accent-secondary rounded-full animate-loading-bar" />
+              </div>
+            </div>
+          )}
+
+          {activeTab === "welcome" && <WelcomeTab lang={lang} />}
+          {activeTab === "risk" && <RiskTab data={riskData} loading={loading} lang={lang} />}
+          {activeTab === "alpha" && <AlphaTab data={alphaData} loading={loading} lang={lang} />}
+          {activeTab === "decision" && <DecisionTab data={optData} loading={loading} lang={lang} />}
         </div>
-
-        {activeTab === "risk" && <RiskTab data={riskData} loading={loading} lang={lang} />}
-        {activeTab === "alpha" && <AlphaTab data={alphaData} loading={loading} lang={lang} />}
-        {activeTab === "decision" && <DecisionTab data={optData} loading={loading} lang={lang} />}
       </main>
     </div>
   );

@@ -1,13 +1,28 @@
 "use client";
 
+import { Fragment } from "react";
+import { useTheme } from "@/hooks/useTheme";
 import { RiskEvaluationResult } from "@/types/api";
 import { t, Lang } from "@/lib/i18n";
+import GlassCard from "@/components/ui/GlassCard";
+import MetricCard from "@/components/ui/MetricCard";
+import SectionHeader from "@/components/ui/SectionHeader";
+import Loading from "@/components/ui/Loading";
+import EmptyState from "@/components/ui/EmptyState";
+import ThemedTooltip from "@/components/charts/ThemedTooltip";
+import {
+  Activity,
+  GitMerge,
+  AlertTriangle,
+  BarChart3,
+  TrendingDown,
+  Wind,
+} from "lucide-react";
 import {
   Area,
   AreaChart,
   CartesianGrid,
   ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
@@ -19,6 +34,9 @@ interface RiskTabProps {
 }
 
 export default function RiskTab({ data, loading, lang }: RiskTabProps) {
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+
   if (loading) return <Loading />;
   if (!data) return <EmptyState text={t(lang, "emptyRisk")} />;
 
@@ -30,26 +48,35 @@ export default function RiskTab({ data, loading, lang }: RiskTabProps) {
   const tickers = data.tickers;
   const corrMatrix = data.correlation_matrix;
 
+  const gridColor = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)";
+  const axisColor = isDark ? "#a1a1aa" : "#57534e";
+  const accentHex = isDark ? "#66fcf1" : "#d97706";
+
   return (
     <div className="space-y-6">
+      {/* Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MetricCard
           label={t(lang, "historicalES")}
           value={`${(data.historical_es * 100).toFixed(2)}%`}
+          icon={AlertTriangle}
           accent
         />
         <MetricCard
           label={t(lang, "monteCarloES")}
           value={`${(data.monte_carlo_es * 100).toFixed(2)}%`}
+          icon={BarChart3}
           accent
         />
         <MetricCard
           label={t(lang, "annVolatility")}
           value={`${(data.annualized_volatility * 100).toFixed(2)}%`}
+          icon={Wind}
         />
         <MetricCard
           label={t(lang, "maxDrawdown")}
           value={`${(data.max_drawdown * 100).toFixed(2)}%`}
+          icon={TrendingDown}
           danger
         />
       </div>
@@ -57,89 +84,85 @@ export default function RiskTab({ data, loading, lang }: RiskTabProps) {
       <div className="grid grid-cols-2 gap-4">
         <MetricCard
           label={t(lang, "absLossHistorical")}
-          value={`$${data.absolute_loss_historical.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+          value={`$${data.absolute_loss_historical.toLocaleString(undefined, {
+            maximumFractionDigits: 0,
+          })}`}
+          icon={TrendingDown}
           danger
         />
         <MetricCard
           label={t(lang, "absLossMC")}
-          value={`$${data.absolute_loss_monte_carlo.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+          value={`$${data.absolute_loss_monte_carlo.toLocaleString(undefined, {
+            maximumFractionDigits: 0,
+          })}`}
+          icon={TrendingDown}
           danger
         />
       </div>
 
-      <div className="bg-df-surface border border-df-accent-dim/20 rounded-lg p-4">
-        <h3 className="text-df-accent text-sm font-semibold mb-3">
-          {t(lang, "cumulativeReturns")}
-        </h3>
+      {/* Cumulative Returns Chart */}
+      <GlassCard>
+        <SectionHeader icon={Activity} title={t(lang, "cumulativeReturns")} />
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={cumulativeChartData}>
               <defs>
                 <linearGradient id="colorReturn" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#66fcf1" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#66fcf1" stopOpacity={0} />
+                  <stop offset="5%" stopColor={accentHex} stopOpacity={0.35} />
+                  <stop offset="95%" stopColor={accentHex} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f2833" />
+              <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
               <XAxis
                 dataKey="date"
-                tick={{ fill: "#c5c6c7", fontSize: 10 }}
+                tick={{ fill: axisColor, fontSize: 10 }}
                 tickLine={false}
-                axisLine={{ stroke: "#1f2833" }}
+                axisLine={{ stroke: gridColor }}
                 minTickGap={30}
               />
               <YAxis
-                tick={{ fill: "#c5c6c7", fontSize: 10 }}
+                tick={{ fill: axisColor, fontSize: 10 }}
                 tickLine={false}
-                axisLine={{ stroke: "#1f2833" }}
+                axisLine={{ stroke: gridColor }}
                 tickFormatter={(v: string) => `${v}%`}
               />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#1f2833",
-                  border: "1px solid #45a29e",
-                  borderRadius: 6,
-                  fontSize: 12,
-                }}
-                labelStyle={{ color: "#66fcf1" }}
-                itemStyle={{ color: "#c5c6c7" }}
+              <ThemedTooltip
                 formatter={(value: any) => [`${value}%`, t(lang, "cumulativeReturns")]}
               />
               <Area
                 type="monotone"
                 dataKey="return"
-                stroke="#66fcf1"
+                stroke={accentHex}
                 strokeWidth={2}
                 fill="url(#colorReturn)"
               />
             </AreaChart>
           </ResponsiveContainer>
         </div>
-      </div>
+      </GlassCard>
 
-      <div className="bg-df-surface border border-df-accent-dim/20 rounded-lg p-4">
-        <h3 className="text-df-accent text-sm font-semibold mb-3">
-          {t(lang, "assetCorrelation")}
-        </h3>
+      {/* Correlation Heatmap */}
+      <GlassCard>
+        <SectionHeader icon={GitMerge} title={t(lang, "assetCorrelation")} />
         <div className="overflow-x-auto">
           <div
-            className="grid gap-1"
+            className="grid gap-1.5"
             style={{
-              gridTemplateColumns: `repeat(${tickers.length + 1}, minmax(60px, 1fr))`,
+              gridTemplateColumns: `repeat(${tickers.length + 1}, minmax(64px, 1fr))`,
             }}
           >
-            <div className="text-xs text-df-text/50 p-2" />
+            <div className="text-xs text-df-text-secondary/60 p-2" />
             {tickers.map((t) => (
               <div
                 key={t}
-                className="text-xs text-df-text/70 font-medium p-2 text-center"
+                className="text-xs text-df-text-secondary font-semibold p-2 text-center"
               >
                 {t}
               </div>
             ))}
             {tickers.map((rowTicker, i) => (
-              <React.Fragment key={rowTicker}>
-                <div className="text-xs text-df-text/70 font-medium p-2 flex items-center">
+              <Fragment key={rowTicker}>
+                <div className="text-xs text-df-text-secondary font-semibold p-2 flex items-center">
                   {rowTicker}
                 </div>
                 {tickers.map((_, j) => {
@@ -149,68 +172,27 @@ export default function RiskTab({ data, loading, lang }: RiskTabProps) {
                   return (
                     <div
                       key={`${i}-${j}`}
-                      className="text-xs font-mono p-2 text-center rounded"
+                      className="text-xs font-mono p-2 text-center rounded-lg"
                       style={{
                         backgroundColor: isPositive
-                          ? `rgba(102, 252, 241, ${intensity * 0.4})`
-                          : `rgba(255, 107, 107, ${intensity * 0.4})`,
-                        color: intensity > 0.5 ? "#0b0c10" : "#c5c6c7",
+                          ? `rgba(${isDark ? "102, 252, 241" : "217, 119, 6"}, ${intensity * 0.25})`
+                          : `rgba(239, 68, 68, ${intensity * 0.25})`,
+                        color: intensity > 0.5 ? (isDark ? "#0b0c10" : "#fffdfa") : "var(--df-text)",
                       }}
                     >
                       {val.toFixed(2)}
                     </div>
                   );
                 })}
-              </React.Fragment>
+              </Fragment>
             ))}
           </div>
         </div>
-      </div>
+      </GlassCard>
 
-      <div className="text-xs text-df-text/50">{t(lang, "dataSource")}: {data.source}</div>
-    </div>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  accent,
-  danger,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-  danger?: boolean;
-}) {
-  return (
-    <div className="bg-df-surface border border-df-accent-dim/20 rounded-lg p-4">
-      <div className="text-xs text-df-text/70 mb-1">{label}</div>
-      <div
-        className={`text-lg font-bold ${
-          danger ? "text-df-danger" : accent ? "text-df-accent" : "text-white"
-        }`}
-      >
-        {value}
+      <div className="text-xs text-df-text-secondary/60">
+        {t(lang, "dataSource")}: {data.source}
       </div>
     </div>
   );
 }
-
-function Loading() {
-  return (
-    <div className="flex items-center justify-center h-64">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-df-accent" />
-    </div>
-  );
-}
-
-function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="flex items-center justify-center h-64 text-df-text/40 text-sm">
-      {text}
-    </div>
-  );
-}
-
-import React from "react";

@@ -4,6 +4,27 @@ All notable changes to the DeepFirm Quant project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.1.0] - 2026-04-19
+
+### Added
+- **Cozy Glassmorphism UI redesign**: migrated the entire frontend to a warm, premium glassmorphism design system inspired by boardgame_cafe aesthetics. Features include frosted-glass cards (`backdrop-blur-xl`), gradient text headings, hover-lift animations, and click-press micro-interactions.
+- **Full light/dark dual theme**: introduced CSS custom properties (`:root` / `html.dark`) for instant theme switching without page reload. Includes manual light/dark/auto toggle with time-based auto-switching (18:00–06:00 defaults to dark).
+- **Welcome tab with changelog**: added a dedicated "Welcome" tab as the default landing view, displaying a brand hero card and versioned changelog (Added / Changed / Fixed badges) so first-time users no longer see a blank canvas.
+- **Portfolio weight number inputs**: weights section now provides parallel numeric input fields alongside range sliders for precise value entry.
+- **Shared UI component library**: extracted reusable primitives — `GlassCard`, `GradientButton`, `MetricCard`, `SectionHeader`, `Loading`, `EmptyState`, and `ThemedTooltip` — eliminating duplicated chart/metric code across Risk, Alpha, and Decision tabs.
+- **Theme-aware Recharts theming**: all charts (Area, Bar, Pie, Line) now read resolved theme from context and adapt grid colors, tooltip backgrounds, and accent fills dynamically.
+
+### Changed
+- **Sidebar width expanded** from `320px` to `352px` (`w-[22rem]`) for improved control readability.
+- **Backtest default enabled**: out-of-sample backtest checkbox now defaults to `true` on fresh page loads.
+- **Control styling softened**: input borders and backgrounds reduced to subtle `rgba` tints (light: `rgba(0,0,0,0.03)` / dark: `rgba(255,255,255,0.04)`) for a gentler visual presence.
+- **Tab bar redesigned**: pill-style buttons with Lucide icons (`Sparkles`, `Shield`, `TrendingUp`, `Scale`) and gradient active states.
+- **Accordion sidebar sections**: sidebar controls grouped into collapsible accordion panels with Lucide icons per category (Portfolio, Model Config, Black-Litterman View, Backtest).
+
+### Fixed
+- **Eliminated hydration mismatch**: `useTheme`, `useLanguage`, and `usePresets` hooks now use fixed initial states and read `localStorage` only inside `useEffect`, removing the Next.js hydration overlay.
+- **Removed dead code**: cleaned up unused `dismissedError` state, unused `Languages` / `BarChart3` imports in `Sidebar.tsx`, and redundant `import React` statements across UI components leveraging the React 18 JSX transform.
+
 ## [2.0.0] - 2026-04-19
 
 ### Added

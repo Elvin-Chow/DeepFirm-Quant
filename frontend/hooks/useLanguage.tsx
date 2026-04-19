@@ -13,17 +13,20 @@ interface LanguageContextValue {
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [lang, setLangState] = useState<Lang>(() => {
-    if (typeof window === "undefined") return "en";
-    return (localStorage.getItem(STORAGE_KEY) as Lang) || "en";
-  });
+  // Fixed initial value to avoid hydration mismatch
+  const [lang, setLangState] = useState<Lang>("en");
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem(STORAGE_KEY, lang);
-      document.documentElement.lang =
-        lang === "zh" ? "zh-CN" : lang === "tc" ? "zh-TW" : "en";
-    }
+    const stored = (localStorage.getItem(STORAGE_KEY) as Lang) || "en";
+    setLangState(stored);
+    document.documentElement.lang =
+      stored === "zh" ? "zh-CN" : stored === "tc" ? "zh-TW" : "en";
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, lang);
+    document.documentElement.lang =
+      lang === "zh" ? "zh-CN" : lang === "tc" ? "zh-TW" : "en";
   }, [lang]);
 
   const setLang = useCallback((next: Lang) => setLangState(next), []);

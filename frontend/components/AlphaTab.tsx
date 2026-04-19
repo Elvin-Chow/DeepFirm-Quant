@@ -1,14 +1,21 @@
 "use client";
 
+import { useTheme } from "@/hooks/useTheme";
 import { FactorRegressionResult } from "@/types/api";
 import { t, Lang } from "@/lib/i18n";
+import GlassCard from "@/components/ui/GlassCard";
+import MetricCard from "@/components/ui/MetricCard";
+import SectionHeader from "@/components/ui/SectionHeader";
+import Loading from "@/components/ui/Loading";
+import EmptyState from "@/components/ui/EmptyState";
+import ThemedTooltip from "@/components/charts/ThemedTooltip";
+import { BarChart3, Table2, Ruler, Eye, BookOpen } from "lucide-react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
   ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
@@ -20,6 +27,9 @@ interface AlphaTabProps {
 }
 
 export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+
   if (loading) return <Loading />;
   if (!data) return <EmptyState text={t(lang, "emptyAlpha")} />;
 
@@ -36,134 +46,125 @@ export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
     significant: m.p < 0.05,
   }));
 
-  const isSignificant = (p: number) => p < 0.05;
+  const gridColor = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)";
+  const axisColor = isDark ? "#a1a1aa" : "#57534e";
+  const accentHex = isDark ? "#66fcf1" : "#d97706";
+  const dimHex = isDark ? "#45a29e" : "#b45309";
 
   return (
     <div className="space-y-6">
-      <div className="bg-df-surface border border-df-accent-dim/20 rounded-lg p-4">
-        <h3 className="text-df-accent text-sm font-semibold mb-3">
-          {t(lang, "factorAttribution")}
-        </h3>
+      {/* Factor Attribution Chart */}
+      <GlassCard>
+        <SectionHeader icon={BarChart3} title={t(lang, "factorAttribution")} />
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={barData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f2833" />
+              <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
               <XAxis
                 dataKey="name"
-                tick={{ fill: "#c5c6c7", fontSize: 12 }}
+                tick={{ fill: axisColor, fontSize: 12 }}
                 tickLine={false}
-                axisLine={{ stroke: "#1f2833" }}
+                axisLine={{ stroke: gridColor }}
               />
               <YAxis
-                tick={{ fill: "#c5c6c7", fontSize: 10 }}
+                tick={{ fill: axisColor, fontSize: 10 }}
                 tickLine={false}
-                axisLine={{ stroke: "#1f2833" }}
+                axisLine={{ stroke: gridColor }}
                 tickFormatter={(v: number) => v.toFixed(2)}
               />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#1f2833",
-                  border: "1px solid #45a29e",
-                  borderRadius: 6,
-                  fontSize: 12,
-                }}
-                labelStyle={{ color: "#66fcf1" }}
-                itemStyle={{ color: "#c5c6c7" }}
+              <ThemedTooltip
                 formatter={(value: any) => [Number(value).toFixed(4), t(lang, "coefficient")]}
               />
-              <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+              <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                 {barData.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
-                    fill={entry.significant ? "#66fcf1" : "#45a29e"}
+                    fill={entry.significant ? accentHex : dimHex}
                   />
                 ))}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
-      </div>
+      </GlassCard>
 
-      <div className="bg-df-surface border border-df-accent-dim/20 rounded-lg p-4">
-        <h3 className="text-df-accent text-sm font-semibold mb-3">
-          {t(lang, "regressionMetrics")}
-        </h3>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-df-text/70 border-b border-df-accent-dim/20">
-              <th className="text-left py-2">{t(lang, "factor")}</th>
-              <th className="text-right py-2">{t(lang, "coefficient")}</th>
-              <th className="text-right py-2">{t(lang, "tStat")}</th>
-              <th className="text-right py-2">{t(lang, "pValue")}</th>
-              <th className="text-right py-2">{t(lang, "significance")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {metrics.map((m) => (
-              <tr key={m.label} className="border-b border-df-accent-dim/10">
-                <td className="py-2">{m.label}</td>
-                <td className="text-right py-2">{m.value.toFixed(4)}</td>
-                <td className="text-right py-2">
-                  {m.label === "Alpha"
-                    ? data.t_stat_alpha.toFixed(2)
-                    : m.label === "Mkt-RF"
-                    ? data.t_stat_mkt.toFixed(2)
-                    : m.label === "SMB"
-                    ? data.t_stat_smb.toFixed(2)
-                    : data.t_stat_hml.toFixed(2)}
-                </td>
-                <td className="text-right py-2">{m.p.toFixed(4)}</td>
-                <td className="text-right py-2">
-                  <span
-                    className={`px-2 py-0.5 rounded text-xs ${
-                      isSignificant(m.p)
-                        ? "bg-green-900/30 text-green-400"
-                        : "bg-df-bg text-df-text/50"
-                    }`}
-                  >
-                    {isSignificant(m.p) ? t(lang, "significant") : t(lang, "notSignificant")}
-                  </span>
-                </td>
+      {/* Regression Metrics Table */}
+      <GlassCard>
+        <SectionHeader icon={Table2} title={t(lang, "regressionMetrics")} />
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-df-text-secondary border-b border-df-border">
+                <th className="text-left py-3 px-2">{t(lang, "factor")}</th>
+                <th className="text-right py-3 px-2">{t(lang, "coefficient")}</th>
+                <th className="text-right py-3 px-2">{t(lang, "tStat")}</th>
+                <th className="text-right py-3 px-2">{t(lang, "pValue")}</th>
+                <th className="text-right py-3 px-2">{t(lang, "significance")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {metrics.map((m) => (
+                <tr
+                  key={m.label}
+                  className="border-b border-df-border/50 hover:bg-df-surface-solid/20 transition-colors"
+                >
+                  <td className="py-3 px-2 font-medium">{m.label}</td>
+                  <td className="text-right py-3 px-2 font-mono">
+                    {m.value.toFixed(4)}
+                  </td>
+                  <td className="text-right py-3 px-2 font-mono">
+                    {m.label === "Alpha"
+                      ? data.t_stat_alpha.toFixed(2)
+                      : m.label === "Mkt-RF"
+                      ? data.t_stat_mkt.toFixed(2)
+                      : m.label === "SMB"
+                      ? data.t_stat_smb.toFixed(2)
+                      : data.t_stat_hml.toFixed(2)}
+                  </td>
+                  <td className="text-right py-3 px-2 font-mono">{m.p.toFixed(4)}</td>
+                  <td className="text-right py-3 px-2">
+                    <span
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        m.p < 0.05
+                          ? "bg-df-accent/10 text-df-accent"
+                          : "bg-df-surface-solid/30 text-df-text-secondary"
+                      }`}
+                    >
+                      {m.p < 0.05 ? (
+                        <>
+                          <Eye size={10} />
+                          {t(lang, "significant")}
+                        </>
+                      ) : (
+                        t(lang, "notSignificant")
+                      )}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </GlassCard>
 
+      {/* Bottom Metrics */}
       <div className="grid grid-cols-3 gap-4">
-        <MetricCard label="R²" value={data.r_squared.toFixed(4)} />
-        <MetricCard label={t(lang, "adjRSquared")} value={data.adj_r_squared.toFixed(4)} />
-        <MetricCard label={t(lang, "observations")} value={data.n_observations.toString()} />
+        <MetricCard label="R²" value={data.r_squared.toFixed(4)} icon={Ruler} />
+        <MetricCard
+          label={t(lang, "adjRSquared")}
+          value={data.adj_r_squared.toFixed(4)}
+          icon={Ruler}
+        />
+        <MetricCard
+          label={t(lang, "observations")}
+          value={data.n_observations.toString()}
+          icon={BookOpen}
+        />
       </div>
 
-      <div className="text-xs text-df-text/50">
+      <div className="text-xs text-df-text-secondary/60">
         {t(lang, "dataSource")}: {data.source}
       </div>
-    </div>
-  );
-}
-
-function MetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-df-surface border border-df-accent-dim/20 rounded-lg p-4">
-      <div className="text-xs text-df-text/70 mb-1">{label}</div>
-      <div className="text-lg font-bold text-white">{value}</div>
-    </div>
-  );
-}
-
-function Loading() {
-  return (
-    <div className="flex items-center justify-center h-64">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-df-accent" />
-    </div>
-  );
-}
-
-function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="flex items-center justify-center h-64 text-df-text/40 text-sm">
-      {text}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 export interface Preset {
   name: string;
@@ -37,7 +37,12 @@ function savePresets(presets: Preset[]) {
 }
 
 export function usePresets() {
-  const [presets, setPresets] = useState<Preset[]>(loadPresets);
+  // Fixed initial value to avoid hydration mismatch
+  const [presets, setPresets] = useState<Preset[]>([]);
+
+  useEffect(() => {
+    setPresets(loadPresets());
+  }, []);
 
   const addPreset = useCallback((preset: Preset) => {
     setPresets((prev) => {

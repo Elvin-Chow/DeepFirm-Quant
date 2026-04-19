@@ -1,6 +1,6 @@
 export interface ViewSpec {
-  ticker: string;
-  relative?: string;
+  assets: string[];
+  relative_assets?: string[];
   expected_return: number;
   confidence: number;
 }
