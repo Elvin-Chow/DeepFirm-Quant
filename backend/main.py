@@ -1,5 +1,6 @@
 """FastAPI backend for the DeepFirm Quant engine."""
 
+import os
 from contextlib import asynccontextmanager
 from datetime import date
 from typing import AsyncGenerator, List, Literal, Optional
@@ -78,9 +79,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+origins_env = os.getenv("ALLOW_ORIGINS")
+if origins_env:
+    allow_origins = [o.strip() for o in origins_env.split(",")]
+else:
+    allow_origins = ["http://localhost:3000"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
