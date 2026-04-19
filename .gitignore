@@ -62,5 +62,11 @@ rosy-sprouting-engelbart.md
 verify_sprint*.py
 start_dev.sh
 
+# Node.js / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
 # Plans
 plans/

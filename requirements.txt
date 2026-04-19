@@ -4,7 +4,6 @@ pydantic
 pandas
 numpy
 scipy
-sqlalchemy
 yfinance
 akshare
 pandas_market_calendars
@@ -12,7 +11,4 @@ scikit-learn
 statsmodels
 requests
 requests-cache
-streamlit
-streamlit-echarts
 pyarrow
-python-dotenv

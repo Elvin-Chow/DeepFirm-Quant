@@ -14,26 +14,28 @@ Designed for data science rigor, DeepFirm Quant bridges the gap between theoreti
 
 Unlike standard static screeners, this system is driven by dynamic quantitative models:
 
-- **Bayesian Portfolio Optimization:** Implements the **Black-Litterman model** to fuse market equilibrium (prior) with subjective or ML-driven expected returns (views), outputting mathematically stable posterior weights via `scipy.optimize.minimize` (SLSQP).
-- **Extreme Risk Simulation:** Moves beyond historical Max Drawdown by utilizing **Monte Carlo Simulations** (Geometric Brownian Motion) to project future Expected Shortfall (ES) under tail-risk scenarios.
+- **Bayesian Portfolio Optimization:** Implements the **Black-Litterman model** to fuse market equilibrium (prior) with subjective or ML-driven expected returns (views), outputting mathematically
+ stable posterior weights via `scipy.optimize.minimize` (SLSQP).
+- **Extreme Risk Simulation:** Moves beyond historical Max Drawdown by utilizing **Monte Carlo Simulations** (Geometric Brownian Motion) to project future Expec
+ted Shortfall (ES) under tail-risk scenarios.
 - **Factor Attribution:** Deploys **Fama-French Three-Factor regression** (`statsmodels`) to decouple true portfolio Alpha from market Beta and style drift.
 - **Robust OOS Testing:** Features an anti-overfitting pipeline with strict chronological train/test splits, dynamic benchmark adaptation (SPY / ^HSI / VT), and a composite Quant Scoring system (Sharpe, IR, Max DD).
 
 ## 🛠️ Tech Stack & Architecture
 
-- **Frontend:** Streamlit, ECharts (Responsive & Interactive Visualizations)
-- **Backend:** FastAPI, Pydantic V2 (Asynchronous REST API)
+- **Frontend:** Next.js 14, React, TypeScript, Tailwind CSS
+- **Backend:** FastAPI, Pydantic V2 (Stateless REST API)
 - **Compute Engine:** NumPy, Pandas, SciPy, Statsmodels
 - **Data Pipeline:** yfinance (Primary), Tiingo (Fallback routing), AKShare (Macro/A-shares)
-- **Infrastructure:** SQLite persistence, Multi-market FX normalization (USD/HKD)
+- **Infrastructure:** Stateless computation, Multi-market FX normalization (USD/HKD)
 
 ## 🚀 Quick Start
 
-This project runs on **two separate processes** (backend API + frontend dashboard). You will need **two terminal windows** open at the same time.
+This project consists of a **FastAPI backend** and a **Next.js frontend**. You will need **two terminal windows** open at the same time.
 
-**Prerequisites:** Python 3.10 or higher, and Git installed.
+**Prerequisites:** Python 3.10+, Node.js 18+, and Git installed.
 
-### Step 1: Clone and Install
+### Step 1: Clone and Install Python Dependencies
 
 Open **Terminal 1** and run:
 
@@ -45,9 +47,19 @@ pip install -r requirements.txt
 
 > The installation may take a few minutes. Ensure all dependencies install successfully before proceeding.
 
-### Step 2: Start the Backend (Terminal 1)
+### Step 2: Install Node.js Dependencies
 
-While still inside the `DeepFirm-Quant` folder in **Terminal 1**, run:
+In the same terminal, run:
+
+```bash
+cd frontend
+npm install
+cd ..
+```
+
+### Step 3: Start the Backend (Terminal 1)
+
+From the project root in **Terminal 1**, run:
 
 ```bash
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
@@ -55,16 +67,16 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000
 
 You should see `Uvicorn running on http://0.0.0.0:8000`. **Leave this terminal running.**
 
-### Step 3: Start the Frontend (Terminal 2)
+### Step 4: Start the Frontend (Terminal 2)
 
-Open a **second terminal window**. You must navigate to the same project folder before launching the dashboard:
+Open a **second terminal window**, navigate to the project folder, then into the frontend directory:
 
 ```bash
-cd DeepFirm-Quant
-streamlit run frontend/app.py
+cd DeepFirm-Quant/frontend
+npm run dev
 ```
 
-Your default web browser should automatically open at `http://localhost:8501`. If it does not, copy this URL into your browser manually.
+Your default web browser should automatically open at `http://localhost:3000`. If it does not, copy this URL into your browser manually.
 
 ### Usage Workflow
 

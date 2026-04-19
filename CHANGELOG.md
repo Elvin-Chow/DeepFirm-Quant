@@ -4,6 +4,26 @@ All notable changes to the DeepFirm Quant project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.0] - 2026-04-19
+
+### Added
+- **Next.js 14 frontend:** completely new React 18 + TypeScript + Tailwind CSS dashboard replacing the legacy Streamlit monolith. All UI state lives in React memory; the backend remains strictly stateless.
+- **FastAPI stateless backend:** removed SQLite persistence layer (`backend/database.py`, `backend/crud.py`, `data/portfolios.db`) and all session-scoped storage. The backend now exposes three pure computation endpoints (`/api/v1/risk/evaluate`, `/api/v1/alpha/fama-french`, `/api/v1/portfolio/optimize`) with no side effects between requests.
+- **Recharts data visualization:** migrated all charts (Area, Bar, Pie, Line) from ECharts to Recharts for tighter React integration and reduced bundle size. Includes cumulative return area charts, factor attribution bar charts, prior/posterior donut charts, and OOS backtest line charts.
+- **Browser-side portfolio presets:** users can save and load entire parameter configurations (tickers, weights, market, capital, leverage, Monte Carlo paths, Black-Litterman views, Tiingo key, etc.) via `localStorage`. No portfolio data is transmitted to or stored on the server.
+- **Multi-language UI:** full internationalization supporting English (`en`), Simplified Chinese (`zh`), and Traditional Chinese (`tc`). Language preference is persisted in `localStorage` and applied to all labels, tab names, chart tooltips, and table headers.
+- **CORS middleware:** configured `CORSMiddleware` in FastAPI to allow cross-origin requests from `http://localhost:3000` during local development.
+
+### Changed
+- **Uvicorn launch environment:** backend now explicitly runs under the project's `.venv` Python interpreter (`yfinance` 1.2.2) to avoid environment skew that caused batch download behavior differences under the system Anaconda distribution.
+- **`fetcher.last_source` initialization:** `fetch_equity_batch` no longer inherits the initial `"unknown"` value when determining `batch_best_source`. This prevents stale source labels from leaking into API responses after a successful yfinance batch download.
+- **Frontend build tooling:** replaced `streamlit` and `streamlit-echarts` with `next`, `react`, `react-dom`, `recharts`, `tailwindcss`, `typescript`, and `autoprefixer` in `frontend/package.json`.
+
+### Fixed
+- **Data source displaying "unknown":** resolved an issue where `RiskEvaluationResult.source`, `FactorRegressionResult.source`, and `OptimizationResult.source` all returned `"unknown"` on fresh cache misses. The root cause was a combination of backend process running against the wrong Python environment and `batch_best_source` being initialized from `self.last_source` before any fetch attempt.
+- **Missing Tiingo API key input:** restored a password input field in the configuration sidebar. The key is now forwarded through all three API request payloads (`api_key`) so Tiingo failover works consistently across risk, alpha, and optimization pipelines.
+- **Tooltip formatter TypeScript errors:** relaxed `formatter` prop types in Recharts `<Tooltip>` components from strict `number`/`string` signatures to `any` to accommodate the library's internal `ValueType | undefined` union without disabling compiler checks globally.
+
 ## [1.1.0] - 2026-04-18
 
 ### Added

@@ -1,4 +1,4 @@
-"""FastAPI skeleton for the DeepFirm Quant backend."""
+"""FastAPI backend for the DeepFirm Quant engine."""
 
 from contextlib import asynccontextmanager
 from datetime import date
@@ -6,11 +6,10 @@ from typing import AsyncGenerator, List, Literal, Optional
 
 import numpy as np
 import pandas as pd
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
-from backend.crud import create_portfolio, get_all_portfolios
-from backend.database import get_db
 from data_pipeline import AlignmentError, DataFetcherError, MarketAligner, SmartFetcher
 from models import (
     BayesianOptimizer,
@@ -22,34 +21,6 @@ from models import (
     RiskEvaluationResult,
     ViewSpec,
 )
-from sqlalchemy.orm import Session
-
-
-class FetchPayload(BaseModel):
-    """Payload for fetching market data."""
-
-    symbol: str = Field(..., min_length=1, description="Ticker symbol")
-    start_date: date = Field(..., description="Inclusive start date")
-    end_date: date = Field(..., description="Inclusive end date")
-    api_key: Optional[str] = Field(default=None, description="Tiingo API key for failover")
-
-    @field_validator("end_date")
-    @classmethod
-    def validate_date_range(cls, end_date: date, info) -> date:
-        start_date = info.data.get("start_date")
-        if start_date and end_date < start_date:
-            raise ValueError("end_date must be on or after start_date")
-        return end_date
-
-
-class FetchResult(BaseModel):
-    """Result metadata for a fetched time series."""
-
-    symbol: str
-    records: int
-    start_date: date
-    end_date: date
-    columns: list[str]
 
 
 class AlphaAnalysisRequest(BaseModel):
@@ -107,6 +78,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 aligner = MarketAligner()
 factor_analyzer = FactorAnalyzer()
 bl_optimizer = BayesianOptimizer()
@@ -116,48 +95,6 @@ bl_optimizer = BayesianOptimizer()
 async def health_check() -> dict[str, str]:
     """Health probe endpoint."""
     return {"status": "ok"}
-
-
-@app.post("/fetch/us_equity", response_model=FetchResult)
-async def fetch_us_equity(payload: FetchPayload) -> FetchResult:
-    """Fetch US equity historical prices."""
-    try:
-        response = SmartFetcher(api_key=payload.api_key).fetch_us_equity(
-            payload.symbol, payload.start_date, payload.end_date
-        )
-    except DataFetcherError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    return FetchResult(
-        symbol=response.symbol,
-        records=response.records,
-        start_date=response.start_date,
-        end_date=response.end_date,
-        columns=response.data.columns.tolist(),
-    )
-
-
-@app.post("/fetch/hk_equity", response_model=FetchResult)
-async def fetch_hk_equity(payload: FetchPayload) -> FetchResult:
-    """Fetch Hong Kong equity historical prices."""
-    try:
-        response = SmartFetcher(api_key=payload.api_key).fetch_hk_equity(
-            payload.symbol, payload.start_date, payload.end_date
-        )
-    except DataFetcherError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    return FetchResult(
-        symbol=response.symbol,
-        records=response.records,
-        start_date=response.start_date,
-        end_date=response.end_date,
-        columns=response.data.columns.tolist(),
-    )
 
 
 @app.post("/api/v1/risk/evaluate", response_model=RiskEvaluationResult)
@@ -233,7 +170,6 @@ async def optimize_portfolio(payload: PortfolioOptimizeRequest) -> OptimizationR
             BENCHMARK_MAP = {"us": "SPY", "hk": "^HSI", "mixed": "VT"}
             benchmark_ticker = BENCHMARK_MAP.get(payload.market, "SPY")
 
-            # Fetch benchmark prices and compute daily returns aligned with test_df
             bench_resp = fetcher.fetch_us_equity(benchmark_ticker, payload.start_date, payload.end_date)
             bench_prices = bench_resp.data.set_index("Date")["Close"]
             bench_prices.index = pd.to_datetime(bench_prices.index).tz_localize(None).normalize()
@@ -284,65 +220,3 @@ async def optimize_portfolio(payload: PortfolioOptimizeRequest) -> OptimizationR
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return result
-
-
-class PortfolioPayload(BaseModel):
-    """Payload for saving a portfolio configuration."""
-
-    name: str = Field(..., min_length=1)
-    total_capital: float = Field(default=1_000_000, gt=0)
-    leverage: float = Field(default=1.0, gt=0)
-    tickers_weights_json: str = Field(default="{}")
-    start_date: str = Field(default="")
-    end_date: str = Field(default="")
-    view_ticker: str = Field(default="")
-    view_relative: str = Field(default="")
-    view_return: float = Field(default=0.02)
-    view_confidence: float = Field(default=0.3)
-    max_weight_pct: int = Field(default=40)
-    mc_paths: int = Field(default=10_000)
-    lang: str = Field(default="en-US")
-    backtest_enabled: bool = Field(default=False)
-    test_ratio: float = Field(default=0.20)
-    market: str = Field(default="us")
-
-
-@app.post("/api/v1/portfolio")
-async def save_portfolio(
-    payload: PortfolioPayload,
-    db: Session = Depends(get_db),
-) -> dict:
-    """Persist a portfolio configuration to SQLite."""
-    record = create_portfolio(db, payload.model_dump())
-    return {"id": record.id, "name": record.name, "created_at": record.created_at.isoformat()}
-
-
-@app.get("/api/v1/portfolio")
-async def list_portfolios(
-    db: Session = Depends(get_db),
-) -> List[dict]:
-    """Retrieve all saved portfolio configurations."""
-    records = get_all_portfolios(db)
-    return [
-        {
-            "id": r.id,
-            "name": r.name,
-            "total_capital": r.total_capital,
-            "leverage": r.leverage,
-            "tickers_weights_json": r.tickers_weights_json,
-            "start_date": r.start_date,
-            "end_date": r.end_date,
-            "view_ticker": r.view_ticker,
-            "view_relative": r.view_relative,
-            "view_return": r.view_return,
-            "view_confidence": r.view_confidence,
-            "max_weight_pct": r.max_weight_pct,
-            "mc_paths": r.mc_paths,
-            "lang": r.lang,
-            "backtest_enabled": bool(r.backtest_enabled),
-            "test_ratio": float(r.test_ratio),
-            "market": r.market,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in records
-    ]

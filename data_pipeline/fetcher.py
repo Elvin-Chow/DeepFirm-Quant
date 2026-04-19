@@ -332,7 +332,7 @@ class SmartFetcher:
             return combined
 
         # Track the best source achieved in this batch so fallback does not downgrade it
-        batch_best_source = self.last_source
+        batch_best_source = None
 
         # Attempt a single yfinance batch download to minimize HTTP requests
         if missing_tickers:
@@ -392,7 +392,7 @@ class SmartFetcher:
             series_list.append(prices)
 
         # Restore the best source if a fallback pushed it down to sandbox
-        if batch_best_source != "sandbox" and self.last_source == "sandbox":
+        if batch_best_source and batch_best_source != "sandbox" and self.last_source == "sandbox":
             self.last_source = batch_best_source
 
         aligned = pd.concat([s.to_frame() for s in series_list], axis=1)
