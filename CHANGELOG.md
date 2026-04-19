@@ -1,0 +1,93 @@
+# Changelog
+
+All notable changes to the DeepFirm Quant project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [1.1.0] - 2026-04-18
+
+### Added
+- Unified app version bumped to `1.1.0` across FastAPI (`backend/main.py`) and reflected in system metadata.
+- Batch-best-source tracking in `fetch_equity_batch` to prevent sandbox fallback from overwriting a successful yfinance source.
+
+### Changed
+- **Tiingo failover rewritten from scratch:** removed brittle `pandas_datareader` dependency and replaced with a lightweight `requests`-based REST client (`_fetch_tiingo`). This fixes Python 3.14+ `distutils`/`LooseVersion` incompatibilities and makes Tiingo failover reliable out of the box.
+- Frontend **Run Analysis** button no longer blocks execution when the Tiingo API key is empty. The key is only required for Tiingo failover; Yahoo Finance batch download works without it.
+- Removed dead `color` variable assignments in frontend source captions (three occurrences in Risk, Alpha, and Decision tabs).
+
+### Fixed
+- **Missing `source` in risk evaluation:** `RiskEngine.evaluate()` now correctly forwards `fetcher.last_source` into `RiskEvaluationResult.source`, so the Risk tab displays the actual data provider instead of "unknown".
+- **Missing `api_key` in standalone fetch endpoints:** `/fetch/us_equity` and `/fetch/hk_equity` now pass the payload `api_key` to `SmartFetcher`, enabling Tiingo failover on those routes as well.
+- **HK benchmark label desync:** `st.session_state["market"]` is now persisted immediately after market selection and restored on portfolio load, ensuring the OOS backtest chart labels the correct benchmark (SPY / ^HSI / VT).
+- **Yahoo Finance batch download source override:** if batch download partially succeeds and some tickers fall back to synthetic sandbox data, `last_source` is restored to `yfinance` rather than incorrectly reporting `sandbox`.
+
+## [1.0.0] - 2026-04-18
+
+### Added
+- Multi-market equity support: Hong Kong stocks (`.HK` suffix) with dedicated HKEX calendar alignment.
+- Market selector in sidebar supporting `us`, `hk`, and `mixed` modes with ticker suffix validation.
+- Fixed FX normalization (`HKD/USD = 1/7.8`) for mixed-mode portfolios so HKD-denominated prices are converted to USD before return calculation.
+- Dynamic benchmark adaptation: `SPY` for US, `^HSI` for HK, and `VT` for mixed markets in OOS backtests.
+- HK ticker normalization (`_normalize_yf_symbol`) to strip leading zeros before `.HK` suffix for Yahoo Finance compatibility.
+- Per-instance rate limiting in Yahoo Finance fetcher (`_fetch_yf`) enforcing a minimum 2-second interval between calls to mitigate HTTP 429 errors.
+- Market-calendar-aware time-series aligner using official exchange calendars (`NYSE`, `HKEX`, `SSE`) via `pandas_market_calendars`.
+- Out-of-sample (OOS) backtest module with chronological train/test split and cumulative return visualization.
+- Equal-weight benchmark overlay for OOS performance comparison.
+- Risk-adjusted OOS metrics: Sharpe Ratio, Max Drawdown, and Information Ratio.
+- Comprehensive model scoring system (0–100) across six dimensions: Profitability, Risk Control, Alpha Capability, Stability, Win Rate, and Consistency.
+- Letter-grade rating mapping (S/A/B/C/D) derived from a weighted composite (Risk Control 40%, Return Stability 60%).
+- Interactive ECharts radar chart for visualizing multi-dimensional strategy performance.
+- Persistent SQLite schema fields `backtest_enabled` and `test_ratio` for portfolio configurations.
+
+### Changed
+- Cross-market alignment now handles holiday gaps via forward-fill and backward-fill to prevent empty intersection errors.
+- Chart legends repositioned to vertical right-aligned layout with semi-transparent background to avoid axis overlap.
+- OOS backtest chart and metric cards moved into the Risk tab to preserve tab stability.
+
+### Fixed
+- Resolved Streamlit widget state modification error on portfolio load by introducing a deferred `_pending_load_state` application pattern with `st.rerun()`.
+- Patched invalid asset filtering in Black-Litterman view matrices to prevent `KeyError` when tickers are missing from the view specification.
+- Added automatic SQLite schema migration (`ALTER TABLE`) for legacy portfolios missing `backtest_enabled` and `test_ratio` columns.
+- Fixed `result.source` display in `/api/v1/portfolio/optimize` so it reflects the portfolio data source rather than the subsequent benchmark fetch source.
+- Replaced `.loc` with `.reindex(...).fillna(0.0)` for benchmark alignment to prevent `KeyError` when test dates are missing from the benchmark series.
+- Fixed BL view input desync by switching ticker text inputs to `st.selectbox` bound to the current portfolio ticker list.
+
+## [0.8.0]
+
+### Added
+- Full internationalization (i18n) support with localized dictionaries for `en-US`, `zh-CN`, and `zh-HK`.
+- Fama-French three-factor alpha attribution engine (`models/factor_analysis.py`) with regression significance testing.
+- Alpha tab featuring factor bar charts, metric tables with p-values, and automated style attribution (high/low beta, small/large cap, value/growth).
+- Cumulative return performance curve rendered with gradient area styling in the Risk tab.
+- Bidirectional weight controls combining number inputs and sliders with real-time synchronization.
+- SQLite-backed portfolio persistence layer with CRUD operations for saving and loading configurations.
+- Absolute loss calculation: `capital × leverage × ES` displayed alongside percentage metrics.
+
+### Changed
+- Dashboard layout switched to wide mode with dark-themed custom CSS for improved readability.
+- Lazy caching mechanism implemented via `session_state` so tab switching does not re-trigger API calls.
+
+## [0.5.0]
+
+### Added
+- Tiingo API integration as a secondary data source with automatic failover when Yahoo Finance requests are blocked.
+- `SmartFetcher` routing layer that tracks the active source (`yfinance` or `tiingo`) and surfaces it in API responses.
+- Black-Litterman Bayesian portfolio optimizer (`models/portfolio_opt.py`) supporting investor views with confidence levels.
+- Mean-variance weight optimization using sequential least squares programming (SLSQP) under long-only, full-investment, and per-asset maximum-weight constraints.
+- `/api/v1/portfolio/optimize` REST endpoint delivering prior and posterior allocation recommendations.
+- Decision tab with prior/posterior donut charts, weight shift tables, and actionable rebalancing orders (Buy/Hold/Sell).
+
+### Changed
+- Data fetcher architecture refactored into a unified pipeline to support multiple upstream providers.
+
+## [0.1.0]
+
+### Added
+- Core equity data fetcher built on `yfinance` for retrieving historical OHLCV time series.
+- Risk computation engine (`models/risk_engine.py`) supporting log-return transformation.
+- Historical Expected Shortfall (ES) at 99% confidence via historical simulation.
+- Monte Carlo ES simulation with configurable path counts (1,000–50,000) and deterministic random seeding.
+- Multi-day Monte Carlo portfolio price path generator for stress visualization.
+- Asset correlation matrix heatmap rendered via ECharts.
+- `/api/v1/risk/evaluate` REST endpoint exposing ES, sample paths, and correlation data.
+- Streamlit dashboard skeleton with the Risk tab as the primary analytical view.
