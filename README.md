@@ -1,3 +1,13 @@
+---
+title: DeepFirm Quant API
+emoji: 📈
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # DeepFirm Quant
 
 ![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)
