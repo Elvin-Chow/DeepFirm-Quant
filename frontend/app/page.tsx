@@ -265,7 +265,7 @@ export default function Home() {
   ];
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen lg:h-screen lg:overflow-hidden">
       <Sidebar
         tickers={tickers}
         setTickers={setTickers}
@@ -319,7 +319,7 @@ export default function Home() {
         />
       )}
 
-      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+      <main className="flex-1 min-w-0 p-4 sm:p-6 lg:h-screen lg:overflow-y-auto lg:p-8">
         <div className="max-w-7xl mx-auto page-fade-in">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
             <div>

@@ -185,9 +185,9 @@ export default function Sidebar(props: SidebarProps) {
   return (
     <aside
       className={`
-        w-[22rem] h-screen bg-df-surface backdrop-blur-2xl border-r border-df-border flex flex-col overflow-y-auto shrink-0 transition-colors duration-400
-        fixed top-0 left-0 z-50 transform transition-transform duration-300 ease-out
-        lg:static lg:translate-x-0
+        w-[22rem] h-screen bg-df-surface backdrop-blur-2xl border-r border-df-border flex flex-col overflow-hidden shrink-0
+        fixed top-0 left-0 z-50 transform transition-[background-color,border-color,transform] duration-300 ease-out
+        lg:static lg:z-auto lg:translate-x-0
         ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
       `}
     >
@@ -263,7 +263,7 @@ export default function Sidebar(props: SidebarProps) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 p-5">
+      <div className="flex-1 min-h-0 overflow-y-auto p-5">
         {error && (
           <div className="mb-4 p-3 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 text-red-700 dark:text-red-300 text-sm flex items-start gap-2">
             <AlertCircle size={16} className="shrink-0 mt-0.5" />
@@ -614,7 +614,7 @@ export default function Sidebar(props: SidebarProps) {
       </div>
 
       {/* Run Button */}
-      <div className="p-5 border-t border-df-border">
+      <div className="shrink-0 p-5 border-t border-df-border">
         <GradientButton onClick={onRun} disabled={loading}>
           <span className="flex items-center justify-center gap-2">
             <Play size={16} />

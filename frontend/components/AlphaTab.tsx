@@ -26,12 +26,34 @@ interface AlphaTabProps {
   lang: Lang;
 }
 
+type ProvenanceFields = FactorRegressionResult & {
+  factor_data_source?: string;
+  factorSource?: string;
+  price_data_source?: string;
+  priceSource?: string;
+};
+
+function resolveSource(value: unknown, fallback = "unknown"): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
 export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
   if (loading) return <Loading />;
   if (!data) return <EmptyState text={t(lang, "emptyAlpha")} />;
+
+  const provenance = data as ProvenanceFields;
+  const priceSource = resolveSource(
+    provenance.source || provenance.price_data_source || provenance.priceSource
+  );
+  const factorSource = resolveSource(
+    provenance.factor_source ||
+      provenance.factor_data_source ||
+      provenance.factorSource,
+    provenance.factor_is_synthetic ? "synthetic" : "unknown"
+  );
 
   const metrics = [
     { label: "Alpha", value: data.alpha, p: data.p_value_alpha },
@@ -173,10 +195,10 @@ export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
 
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-df-text-secondary/60">
         <span>
-          {t(lang, "priceDataSource")}: {data.source}
+          {t(lang, "priceDataSource")}: {priceSource}
         </span>
         <span>
-          {t(lang, "factorDataSource")}: {data.factor_source}
+          {t(lang, "factorDataSource")}: {factorSource}
         </span>
       </div>
     </div>
