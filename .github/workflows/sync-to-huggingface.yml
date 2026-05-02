@@ -13,6 +13,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Prepare Hugging Face Space README
+        run: |
+          cat > README.md <<'EOF'
+          ---
+          title: DeepFirm Quant API
+          emoji: 📈
+          colorFrom: blue
+          colorTo: indigo
+          sdk: docker
+          app_port: 7860
+          pinned: false
+          ---
+
+          # DeepFirm Quant API
+
+          FastAPI backend for DeepFirm Quant.
+
+          ## Runtime
+
+          - Docker Space
+          - FastAPI served on port 7860
+          - Health check: `/health`
+          EOF
+
       - name: Sync repository to Hugging Face Space
         uses: huggingface/hub-sync@v0.1.0
         with:
