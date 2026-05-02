@@ -4,6 +4,24 @@ All notable changes to the DeepFirm Quant project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.2.0] - 2026-05-02
+
+### Changed
+- **Monte Carlo memory profile:** risk evaluation now projects multi-asset return moments into the portfolio return distribution before simulation. Monte Carlo ES still honors the requested path count, while visualization paths are capped at 100 samples to avoid allocating `mc_paths × days × assets` arrays on long backtests.
+- **Risk input hardening:** portfolio risk calculations now reject empty or non-finite return samples and fall back to equal weights when submitted weights are non-finite or sum to zero.
+- **Alpha factor provenance:** Fama-French attribution responses now separate price data source from factor data source and explicitly flag synthetic factor fallback.
+- **Runtime cache semantics:** SmartFetcher caches are now documented as optional runtime market-data caches, separate from portfolio/session persistence, and can be disabled with `DFQ_DISABLE_CACHE=1`.
+- **Decision scoring visualization:** the Decision tab now renders the existing six-dimension model score as a Recharts radar chart alongside OOS performance.
+
+### Fixed
+- **Short-window OOS validation:** chronological train/test splitting now requires at least two complete finite training observations and one test observation before optimization.
+- **Optimization covariance validation:** Black-Litterman inputs now use finite prior-return vectors and PSD covariance matrices instead of raw train-sample covariance output.
+- **Read-only cache startup:** SmartFetcher now degrades gracefully when local cache directories or parquet writes are unavailable.
+- **Zero-weight allocation guard:** frontend analysis now blocks all-zero custom weights, while backend risk and optimization paths safely avoid zero-sum normalization for direct API requests.
+- **Market/ticker mismatch validation:** front-end analysis now blocks `.HK` tickers in US-only mode and non-`.HK` tickers in HK-only mode before any API request is sent.
+- **API-level market contract enforcement:** FastAPI request models now reject the same market/ticker mismatches with Pydantic validation, preventing direct API calls from bypassing the front-end guard.
+- **Local development CORS:** backend defaults now allow both `http://localhost:3000` and `http://127.0.0.1:3000`, preventing browser-side `Failed to fetch` errors when opening the local app by IP literal.
+
 ## [2.1.0] - 2026-04-19
 
 ### Added
@@ -25,14 +43,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Eliminated hydration mismatch**: `useTheme`, `useLanguage`, and `usePresets` hooks now use fixed initial states and read `localStorage` only inside `useEffect`, removing the Next.js hydration overlay.
 - **Removed dead code**: cleaned up unused `dismissedError` state, unused `Languages` / `BarChart3` imports in `Sidebar.tsx`, and redundant `import React` statements across UI components leveraging the React 18 JSX transform.
 
-## [2.0.0] - 2026-04-19
+## [2.0.0]
 
 ### Added
 - **Next.js 14 frontend:** completely new React 18 + TypeScript + Tailwind CSS dashboard replacing the legacy Streamlit monolith. All UI state lives in React memory; the backend remains strictly stateless.
 - **FastAPI stateless backend:** removed SQLite persistence layer (`backend/database.py`, `backend/crud.py`, `data/portfolios.db`) and all session-scoped storage. The backend now exposes three pure computation endpoints (`/api/v1/risk/evaluate`, `/api/v1/alpha/fama-french`, `/api/v1/portfolio/optimize`) with no side effects between requests.
 - **Recharts data visualization:** migrated all charts (Area, Bar, Pie, Line) from ECharts to Recharts for tighter React integration and reduced bundle size. Includes cumulative return area charts, factor attribution bar charts, prior/posterior donut charts, and OOS backtest line charts.
 - **Browser-side portfolio presets:** users can save and load entire parameter configurations (tickers, weights, market, capital, leverage, Monte Carlo paths, Black-Litterman views, Tiingo key, etc.) via `localStorage`. No portfolio data is transmitted to or stored on the server.
-- **Multi-language UI:** full internationalization supporting English (`en`), Simplified Chinese (`zh`), and Traditional Chinese (`tc`). Language preference is persisted in `localStorage` and applied to all labels, tab names, chart tooltips, and table headers.
 - **CORS middleware:** configured `CORSMiddleware` in FastAPI to allow cross-origin requests from `http://localhost:3000` during local development.
 
 ### Changed
@@ -96,7 +113,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.8.0]
 
 ### Added
-- Full internationalization (i18n) support with localized dictionaries for `en-US`, `zh-CN`, and `zh-HK`.
 - Fama-French three-factor alpha attribution engine (`models/factor_analysis.py`) with regression significance testing.
 - Alpha tab featuring factor bar charts, metric tables with p-values, and automated style attribution (high/low beta, small/large cap, value/growth).
 - Cumulative return performance curve rendered with gradient area styling in the Risk tab.

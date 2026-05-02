@@ -34,6 +34,8 @@ class FactorRegressionResult(BaseModel):
     adj_r_squared: float
     n_observations: int
     source: str = Field(default="unknown", description="Data source used for prices")
+    factor_source: str = Field(default="unknown", description="Data source used for factors")
+    factor_is_synthetic: bool = Field(default=False, description="Whether factor data is synthetic")
 
 
 class FactorAnalyzer:
@@ -46,6 +48,17 @@ class FactorAnalyzer:
 
     def __init__(self) -> None:
         self._factor_cache: Optional[pd.DataFrame] = None
+
+    @staticmethod
+    def _mark_factor_source(
+        factors_df: pd.DataFrame,
+        factor_source: str,
+        factor_is_synthetic: bool,
+    ) -> pd.DataFrame:
+        """Attach factor provenance metadata to a DataFrame."""
+        factors_df.attrs["factor_source"] = factor_source
+        factors_df.attrs["factor_is_synthetic"] = factor_is_synthetic
+        return factors_df
 
     def _generate_synthetic_factors(
         self,
@@ -72,7 +85,7 @@ class FactorAnalyzer:
             },
             index=pd.DatetimeIndex(trading_days, name="Date"),
         )
-        return df
+        return self._mark_factor_source(df, "synthetic", True)
 
     def fetch_kf_french_factors(
         self,
@@ -86,7 +99,7 @@ class FactorAnalyzer:
                 & (self._factor_cache.index <= pd.Timestamp(end_date))
             ].copy()
             if not cached.empty:
-                return cached
+                return self._mark_factor_source(cached, "kenneth_french", False)
 
         try:
             response = requests.get(self._KF_URL, timeout=30)
@@ -146,6 +159,7 @@ class FactorAnalyzer:
                 df[col] = pd.to_numeric(df[col], errors="coerce") / 100.0
 
         df = df[["Mkt-RF", "SMB", "HML", "RF"]]
+        df = self._mark_factor_source(df, "kenneth_french", False)
         self._factor_cache = df.copy()
 
         df = df.loc[
@@ -156,7 +170,7 @@ class FactorAnalyzer:
         if df.empty:
             return self._generate_synthetic_factors(start_date, end_date)
 
-        return df
+        return self._mark_factor_source(df, "kenneth_french", False)
 
     def regress_portfolio(
         self,
@@ -189,6 +203,9 @@ class FactorAnalyzer:
         tvalues = model.tvalues
         pvalues = model.pvalues
 
+        factor_source = str(factors_df.attrs.get("factor_source", "unknown"))
+        factor_is_synthetic = bool(factors_df.attrs.get("factor_is_synthetic", False))
+
         return FactorRegressionResult(
             alpha=params.get("const", 0.0),
             beta_mkt=params.get("Mkt-RF", 0.0),
@@ -205,4 +222,6 @@ class FactorAnalyzer:
             r_squared=model.rsquared,
             adj_r_squared=model.rsquared_adj,
             n_observations=int(model.nobs),
+            factor_source=factor_source,
+            factor_is_synthetic=factor_is_synthetic,
         )

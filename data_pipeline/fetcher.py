@@ -66,19 +66,35 @@ class SmartFetcher:
         self.last_source = "unknown"
         self.cache_expire_hours = cache_expire_hours
         self._last_yf_call_time = 0.0
+        self.cache_enabled = os.getenv("DFQ_DISABLE_CACHE", "").lower() not in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        self._result_cache_dir: Optional[str] = None
+        self._session: requests.Session = requests.Session()
 
-        cache_dir = os.path.dirname(cache_name)
-        if cache_dir and not os.path.exists(cache_dir):
-            os.makedirs(cache_dir, exist_ok=True)
+        if self.cache_enabled:
+            cache_dir = os.path.dirname(cache_name)
+            try:
+                if cache_dir and not os.path.exists(cache_dir):
+                    os.makedirs(cache_dir, exist_ok=True)
 
-        self._result_cache_dir = os.path.join(cache_dir, "fetcher_results")
-        os.makedirs(self._result_cache_dir, exist_ok=True)
+                self._result_cache_dir = os.path.join(cache_dir, "fetcher_results")
+                os.makedirs(self._result_cache_dir, exist_ok=True)
 
-        self._session = requests_cache.CachedSession(
-            cache_name,
-            backend="sqlite",
-            expire_after=cache_expire_hours * 3600,
-        )
+                self._session = requests_cache.CachedSession(
+                    cache_name,
+                    backend="sqlite",
+                    expire_after=cache_expire_hours * 3600,
+                )
+            except Exception as exc:
+                logger.warning("local fetch cache disabled: %s", exc)
+                self.cache_enabled = False
+                self._result_cache_dir = None
+                self._session = requests.Session()
+
         self._macro_registry: Dict[str, Callable[..., pd.DataFrame]] = {
             "lpr": ak.macro_china_lpr,
             "shrzgm": ak.macro_china_shrzgm,
@@ -93,6 +109,8 @@ class SmartFetcher:
         end_date: date,
     ) -> str:
         """Build a deterministic file path for a cached DataFrame."""
+        if self._result_cache_dir is None:
+            raise RuntimeError("result cache is disabled")
         safe_symbol = symbol.replace(".", "_").replace("/", "_")
         filename = f"{source}_{safe_symbol}_{start_date.isoformat()}_{end_date.isoformat()}.parquet"
         return os.path.join(self._result_cache_dir, filename)
@@ -105,13 +123,15 @@ class SmartFetcher:
         end_date: date,
     ) -> Optional[pd.DataFrame]:
         """Read a cached DataFrame if it exists and is not stale."""
+        if not self.cache_enabled or self._result_cache_dir is None:
+            return None
         path = self._result_cache_path(source, symbol, start_date, end_date)
         if not os.path.exists(path):
             return None
-        mtime = os.path.getmtime(path)
-        if time.time() - mtime > self.cache_expire_hours * 3600:
-            return None
         try:
+            mtime = os.path.getmtime(path)
+            if time.time() - mtime > self.cache_expire_hours * 3600:
+                return None
             return pd.read_parquet(path)
         except Exception:
             return None
@@ -125,8 +145,13 @@ class SmartFetcher:
         end_date: date,
     ) -> None:
         """Persist a DataFrame to the local result cache."""
+        if not self.cache_enabled or self._result_cache_dir is None:
+            return
         path = self._result_cache_path(source, symbol, start_date, end_date)
-        df.to_parquet(path, index=False)
+        try:
+            df.to_parquet(path, index=False)
+        except Exception as exc:
+            logger.warning("result cache write skipped for %s: %s", symbol, exc)
 
     @staticmethod
     def _normalize_yf_symbol(symbol: str) -> str:
@@ -171,7 +196,7 @@ class SmartFetcher:
         }
         headers = {"Authorization": f"Token {self.api_key}"}
 
-        resp = requests.get(url, params=params, headers=headers, timeout=30)
+        resp = self._session.get(url, params=params, headers=headers, timeout=30)
         resp.raise_for_status()
         data = resp.json()
 

@@ -18,9 +18,10 @@ import {
   PortfolioOptimizeRequest,
   OptimizationResult,
 } from "@/types/api";
-import { t } from "@/lib/i18n";
+import { t, type Lang } from "@/lib/i18n";
 
 type TabKey = "welcome" | "risk" | "alpha" | "decision";
+type MarketMode = "us" | "hk" | "mixed";
 
 function computeDateRange(window: string): { start: string; end: string } {
   const end = new Date();
@@ -47,6 +48,32 @@ function computeDateRange(window: string): { start: string; end: string } {
   }
   const fmt = (d: Date) => d.toISOString().split("T")[0];
   return { start: fmt(start), end: fmt(end) };
+}
+
+function hasHkSuffix(ticker: string): boolean {
+  return ticker.toUpperCase().endsWith(".HK");
+}
+
+function getMarketValidationError(
+  tickerList: string[],
+  selectedMarket: MarketMode,
+  lang: Lang
+): string | null {
+  if (selectedMarket === "mixed") {
+    return null;
+  }
+
+  if (selectedMarket === "us") {
+    const hkTickers = tickerList.filter(hasHkSuffix);
+    return hkTickers.length > 0
+      ? `${t(lang, "errorUsMarketNoHk")} ${hkTickers.join(", ")}`
+      : null;
+  }
+
+  const nonHkTickers = tickerList.filter((ticker) => !hasHkSuffix(ticker));
+  return nonHkTickers.length > 0
+    ? `${t(lang, "errorHkMarketOnlyHk")} ${nonHkTickers.join(", ")}`
+    : null;
 }
 
 export default function Home() {
@@ -81,7 +108,6 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   const handleRun = useCallback(async () => {
-    setLoading(true);
     setError(null);
     setActiveTab("risk");
 
@@ -92,10 +118,35 @@ export default function Home() {
       return;
     }
 
-    const { start, end } = computeDateRange(timeWindow);
+    const marketMode = market as MarketMode;
+    const marketValidationError = getMarketValidationError(
+      tickerList,
+      marketMode,
+      lang
+    );
+    if (marketValidationError) {
+      setError(marketValidationError);
+      setLoading(false);
+      return;
+    }
 
+    const hasCustomWeights = weights.length === tickerList.length;
+    if (hasCustomWeights) {
+      const weightTotal = weights.reduce(
+        (total, weight) => total + (Number.isFinite(weight) ? weight : 0),
+        0
+      );
+      if (Math.abs(weightTotal) <= 1e-12) {
+        setError(t(lang, "errorWeightsMustBePositive"));
+        setLoading(false);
+        return;
+      }
+    }
+
+    setLoading(true);
+    const { start, end } = computeDateRange(timeWindow);
     const normalizedWeights =
-      weights.length === tickerList.length
+      hasCustomWeights
         ? weights.map((w) => w / 100)
         : tickerList.map(() => 1 / tickerList.length);
 
@@ -118,7 +169,7 @@ export default function Home() {
       mc_paths: mcPaths,
       capital,
       leverage,
-      market: market as "us" | "hk" | "mixed",
+      market: marketMode,
       api_key: apiKey || undefined,
     };
 
@@ -126,7 +177,7 @@ export default function Home() {
       tickers: tickerList,
       start_date: start,
       end_date: end,
-      market: market as "us" | "hk" | "mixed",
+      market: marketMode,
       api_key: apiKey || undefined,
     };
 
@@ -139,7 +190,7 @@ export default function Home() {
       max_weight: maxWeight,
       backtest_enabled: backtestEnabled,
       test_ratio: testRatio,
-      market: market as "us" | "hk" | "mixed",
+      market: marketMode,
       api_key: apiKey || undefined,
     };
 

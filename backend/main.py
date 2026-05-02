@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from data_pipeline import AlignmentError, DataFetcherError, MarketAligner, SmartFetcher
 from models import (
@@ -22,6 +22,7 @@ from models import (
     RiskEvaluationResult,
     ViewSpec,
 )
+from models.market_validation import validate_market_tickers
 
 
 class AlphaAnalysisRequest(BaseModel):
@@ -40,6 +41,11 @@ class AlphaAnalysisRequest(BaseModel):
         if start_date and end_date < start_date:
             raise ValueError("end_date must be on or after start_date")
         return end_date
+
+    @model_validator(mode="after")
+    def validate_market_contract(self) -> "AlphaAnalysisRequest":
+        validate_market_tickers(self.tickers, self.market)
+        return self
 
 
 class PortfolioOptimizeRequest(BaseModel):
@@ -65,6 +71,11 @@ class PortfolioOptimizeRequest(BaseModel):
             raise ValueError("end_date must be on or after start_date")
         return end_date
 
+    @model_validator(mode="after")
+    def validate_market_contract(self) -> "PortfolioOptimizeRequest":
+        validate_market_tickers(self.tickers, self.market)
+        return self
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -83,7 +94,10 @@ origins_env = os.getenv("ALLOW_ORIGINS")
 if origins_env:
     allow_origins = [o.strip() for o in origins_env.split(",")]
 else:
-    allow_origins = ["http://localhost:3000"]
+    allow_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
 
 app.add_middleware(
     CORSMiddleware,
@@ -112,7 +126,7 @@ async def evaluate_risk(payload: RiskEvaluationRequest) -> RiskEvaluationResult:
         engine = RiskEngine(fetcher=fetcher, aligner=aligner)
         result = engine.evaluate(payload)
         result.source = fetcher.last_source
-    except (DataFetcherError, AlignmentError) as exc:
+    except (DataFetcherError, AlignmentError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -135,7 +149,7 @@ async def fama_french_alpha(payload: AlphaAnalysisRequest) -> FactorRegressionRe
         )
         result = factor_analyzer.regress_portfolio(portfolio_returns, factors_df)
         result.source = fetcher.last_source
-    except (DataFetcherError, AlignmentError) as exc:
+    except (DataFetcherError, AlignmentError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -155,11 +169,15 @@ async def optimize_portfolio(payload: PortfolioOptimizeRequest) -> OptimizationR
 
         if payload.backtest_enabled:
             train_df, test_df = RiskEngine.split_returns(returns_df, payload.test_ratio)
-            prior_returns = train_df.mean().to_numpy()
-            cov_matrix = train_df.cov().to_numpy()
+            prior_returns, cov_matrix = RiskEngine.prepare_optimization_inputs(
+                train_df,
+                len(payload.tickers),
+            )
         else:
-            prior_returns = returns_df.mean().to_numpy()
-            cov_matrix = returns_df.cov().to_numpy()
+            prior_returns, cov_matrix = RiskEngine.prepare_optimization_inputs(
+                returns_df,
+                len(payload.tickers),
+            )
 
         result = bl_optimizer.optimize_with_views(
             tickers=payload.tickers,
@@ -222,7 +240,7 @@ async def optimize_portfolio(payload: PortfolioOptimizeRequest) -> OptimizationR
             result.model_score_consistency = score_result["consistency"]
 
         result.source = portfolio_source
-    except (DataFetcherError, AlignmentError) as exc:
+    except (DataFetcherError, AlignmentError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

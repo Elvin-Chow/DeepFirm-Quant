@@ -9,7 +9,7 @@ import SectionHeader from "@/components/ui/SectionHeader";
 import Loading from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
 import ThemedTooltip from "@/components/charts/ThemedTooltip";
-import { BarChart3, Table2, Ruler, Eye, BookOpen } from "lucide-react";
+import { AlertTriangle, BarChart3, Table2, Ruler, Eye, BookOpen } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -53,6 +53,15 @@ export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
 
   return (
     <div className="space-y-6">
+      {data.factor_is_synthetic && (
+        <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-200">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+            <span>{t(lang, "syntheticFactorWarning")}</span>
+          </div>
+        </div>
+      )}
+
       {/* Factor Attribution Chart */}
       <GlassCard>
         <SectionHeader icon={BarChart3} title={t(lang, "factorAttribution")} />
@@ -162,8 +171,13 @@ export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
         />
       </div>
 
-      <div className="text-xs text-df-text-secondary/60">
-        {t(lang, "dataSource")}: {data.source}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-df-text-secondary/60">
+        <span>
+          {t(lang, "priceDataSource")}: {data.source}
+        </span>
+        <span>
+          {t(lang, "factorDataSource")}: {data.factor_source}
+        </span>
       </div>
     </div>
   );

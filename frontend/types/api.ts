@@ -60,6 +60,8 @@ export interface FactorRegressionResult {
   adj_r_squared: number;
   n_observations: number;
   source: string;
+  factor_source: string;
+  factor_is_synthetic: boolean;
 }
 
 export interface PortfolioOptimizeRequest {

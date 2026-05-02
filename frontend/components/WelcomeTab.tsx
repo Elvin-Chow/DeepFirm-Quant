@@ -11,6 +11,26 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "2.2.0",
+    date: "2026-05-02",
+    items: [
+      { type: "fixed", text: "Market/ticker mismatch validation now blocks .HK tickers in US-only mode and non-.HK tickers in HK-only mode before analysis starts." },
+      { type: "fixed", text: "FastAPI request models now enforce the same market contract, preventing direct API calls from bypassing the front-end guard." },
+      { type: "fixed", text: "Local development CORS now supports both localhost and 127.0.0.1 browser origins." },
+    ],
+  },
+  {
+    version: "2.1.0",
+    date: "2026-04-19",
+    items: [
+      { type: "added", text: "Cozy glassmorphism UI redesign with theme-aware cards, gradient headings, hover-lift states, and click-press interactions." },
+      { type: "added", text: "Full light/dark/auto theme support powered by CSS custom properties and client-side preference hooks." },
+      { type: "added", text: "Welcome tab with versioned changelog, reusable UI primitives, and theme-aware Recharts components." },
+      { type: "changed", text: "Sidebar, tab bar, and accordion controls were redesigned for clearer scanning and better control readability." },
+      { type: "fixed", text: "Hydration mismatch and dead component code were cleaned up across the frontend." },
+    ],
+  },
+  {
     version: "2.0.0",
     date: "2026-04-19",
     items: [
@@ -18,7 +38,6 @@ const CHANGELOG: ChangelogEntry[] = [
       { type: "added", text: "FastAPI stateless backend with three pure computation endpoints and no server-side persistence." },
       { type: "added", text: "Recharts data visualization: area, bar, pie, and line charts with light/dark theme adaptation." },
       { type: "added", text: "Browser-side portfolio presets saved to localStorage — no data ever hits the server." },
-      { type: "added", text: "Full i18n support for English, Simplified Chinese, and Traditional Chinese." },
       { type: "fixed", text: "Resolved data source 'unknown' issue caused by environment skew and stale source labels." },
     ],
   },

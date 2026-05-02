@@ -19,6 +19,11 @@ import {
   YAxis,
   ResponsiveContainer,
   Legend,
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
 } from "recharts";
 import {
   PieChart as PieChartIcon,
@@ -68,8 +73,19 @@ export default function DecisionTab({ data, loading, lang }: DecisionTabProps) {
       }))
     : [];
 
+  const scoreRadarData = [
+    { dimension: t(lang, "riskControl"), score: data.model_score_risk_control },
+    { dimension: t(lang, "profitability"), score: data.model_score_profitability },
+    { dimension: t(lang, "alphaCapability"), score: data.model_score_alpha },
+    { dimension: t(lang, "stability"), score: data.model_score_stability },
+    { dimension: t(lang, "winRate"), score: data.model_score_win_rate },
+    { dimension: t(lang, "consistency"), score: data.model_score_consistency },
+  ];
+
   const gridColor = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)";
   const axisColor = isDark ? "#a1a1aa" : "#57534e";
+  const primaryStroke = isDark ? "#66fcf1" : "#d97706";
+  const benchmarkStroke = isDark ? "#ff6b6b" : "#e11d48";
 
   return (
     <div className="space-y-6">
@@ -188,44 +204,76 @@ export default function DecisionTab({ data, loading, lang }: DecisionTabProps) {
       {data.backtest_enabled && (
         <GlassCard>
           <SectionHeader icon={FlaskConical} title={t(lang, "oosBacktest")} />
-          <div className="h-72 mb-6">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={backtestChartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fill: axisColor, fontSize: 10 }}
-                  tickLine={false}
-                  axisLine={{ stroke: gridColor }}
-                  minTickGap={30}
-                />
-                <YAxis
-                  tick={{ fill: axisColor, fontSize: 10 }}
-                  tickLine={false}
-                  axisLine={{ stroke: gridColor }}
-                  tickFormatter={(v: string) => `${v}%`}
-                />
-                <ThemedTooltip />
-                <Legend wrapperStyle={{ fontSize: 11, color: axisColor }} />
-                <Line
-                  type="monotone"
-                  dataKey="optimized"
-                  name={t(lang, "optimizedPortfolio")}
-                  stroke={isDark ? "#66fcf1" : "#d97706"}
-                  strokeWidth={2}
-                  dot={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="benchmark"
-                  name={t(lang, "benchmark")}
-                  stroke={isDark ? "#ff6b6b" : "#e11d48"}
-                  strokeWidth={2}
-                  dot={false}
-                  strokeDasharray="5 5"
-                />
-              </LineChart>
-            </ResponsiveContainer>
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] gap-6 mb-6">
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={backtestChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: axisColor, fontSize: 10 }}
+                    tickLine={false}
+                    axisLine={{ stroke: gridColor }}
+                    minTickGap={30}
+                  />
+                  <YAxis
+                    tick={{ fill: axisColor, fontSize: 10 }}
+                    tickLine={false}
+                    axisLine={{ stroke: gridColor }}
+                    tickFormatter={(v: string) => `${v}%`}
+                  />
+                  <ThemedTooltip />
+                  <Legend wrapperStyle={{ fontSize: 11, color: axisColor }} />
+                  <Line
+                    type="monotone"
+                    dataKey="optimized"
+                    name={t(lang, "optimizedPortfolio")}
+                    stroke={primaryStroke}
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="benchmark"
+                    name={t(lang, "benchmark")}
+                    stroke={benchmarkStroke}
+                    strokeWidth={2}
+                    dot={false}
+                    strokeDasharray="5 5"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="h-72">
+              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-df-text">
+                <Award size={16} className="text-df-accent" />
+                <span>{t(lang, "modelScoreRadar")}</span>
+              </div>
+              <ResponsiveContainer width="100%" height="88%">
+                <RadarChart data={scoreRadarData} outerRadius="72%">
+                  <PolarGrid stroke={gridColor} />
+                  <PolarAngleAxis
+                    dataKey="dimension"
+                    tick={{ fill: axisColor, fontSize: 10 }}
+                  />
+                  <PolarRadiusAxis
+                    angle={90}
+                    domain={[0, 100]}
+                    tick={false}
+                    axisLine={false}
+                  />
+                  <Radar
+                    dataKey="score"
+                    name={t(lang, "modelScore")}
+                    stroke={primaryStroke}
+                    fill={primaryStroke}
+                    fillOpacity={0.28}
+                  />
+                  <ThemedTooltip formatter={(value: any) => [`${Number(value).toFixed(1)}`, t(lang, "modelScore")]} />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

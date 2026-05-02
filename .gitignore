@@ -52,6 +52,7 @@ data/
 .env
 
 # Dev / internal docs (not for public repo)
+AGENTS.md
 PROPOSAL.md
 TESTING.md
 UPDATE.md

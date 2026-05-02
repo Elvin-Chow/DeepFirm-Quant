@@ -24,7 +24,9 @@ Unlike standard static screeners, this system is driven by dynamic quantitative 
 - **Backend:** FastAPI, Pydantic V2 (Stateless REST API)
 - **Compute Engine:** NumPy, Pandas, SciPy, Statsmodels
 - **Data Pipeline:** yfinance (Primary), Tiingo (Fallback), AKShare (Macro/A-shares)
-- **Infrastructure:** Stateless computation, Multi-market FX normalization (USD/HKD), Browser-side portfolio persistence
+- **Infrastructure:** Stateless computation, optional runtime market-data cache, Multi-market FX normalization (USD/HKD), Browser-side portfolio persistence
+
+> Stateless API note: the backend does not persist portfolio or session state. `SmartFetcher` may still create runtime market-data caches under `cache/http_cache.sqlite` and `cache/fetcher_results/*.parquet`; set `DFQ_DISABLE_CACHE=1` or mount `cache/` as writable for read-only deployments.
 
 ## Quick Start
 
@@ -81,7 +83,7 @@ cd DeepFirm-Quant/frontend
 npm run dev
 ```
 
-Your default web browser should automatically open at `http://localhost:3000`. If it does not, copy this URL into your browser manually.
+Visit `http://localhost:3000` in your browser after the development server starts.
 
 ## Usage Workflow
 
@@ -94,7 +96,6 @@ Your default web browser should automatically open at `http://localhost:3000`. I
 ## Features
 
 - **Multi-market support:** US, HK, and Mixed portfolios with automatic FX normalization.
-- **Multi-language UI:** English, Simplified Chinese, and Traditional Chinese.
 - **Theme support:** Light, dark, and auto themes.
 - **Portfolio presets:** Save and load configurations via browser localStorage.
 - **Out-of-sample backtesting:** Chronological train/test split with benchmark comparison.

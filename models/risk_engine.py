@@ -5,9 +5,10 @@ from typing import List, Literal, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from data_pipeline import AlignmentError, DataFetcherError, MarketAligner, SmartFetcher
+from models.market_validation import validate_market_tickers
 
 
 class RiskEvaluationRequest(BaseModel):
@@ -31,6 +32,11 @@ class RiskEvaluationRequest(BaseModel):
         if start_date and end_date < start_date:
             raise ValueError("end_date must be on or after start_date")
         return end_date
+
+    @model_validator(mode="after")
+    def validate_market_contract(self) -> "RiskEvaluationRequest":
+        validate_market_tickers(self.tickers, self.market)
+        return self
 
 
 class RiskEvaluationResult(BaseModel):
@@ -70,17 +76,51 @@ class RiskEngine:
         return log_returns.dropna()
 
     @staticmethod
+    def sanitize_returns(returns_df: pd.DataFrame) -> pd.DataFrame:
+        """Return complete finite return rows suitable for numerical routines."""
+        if returns_df.empty:
+            raise ValueError("returns data is empty")
+
+        cleaned = returns_df.replace([np.inf, -np.inf], np.nan).dropna(how="any")
+        if cleaned.empty:
+            raise ValueError("returns data contains no complete finite rows")
+        return cleaned
+
+    @staticmethod
     def split_returns(
         returns_df: pd.DataFrame,
         test_ratio: float,
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Split returns chronologically into in-sample and out-of-sample DataFrames."""
+        returns_df = RiskEngine.sanitize_returns(returns_df)
         n_total = len(returns_df)
         n_test = max(1, int(n_total * test_ratio))
         n_train = n_total - n_test
+        if n_train < 2:
+            raise ValueError(
+                "at least 3 complete finite return observations are required for OOS backtest"
+            )
         train_df = returns_df.iloc[:n_train]
         test_df = returns_df.iloc[n_train:]
+        if test_df.empty:
+            raise ValueError("OOS test sample is empty")
         return train_df, test_df
+
+    @staticmethod
+    def _normalize_weights(weights: Optional[List[float]], n_assets: int) -> np.ndarray:
+        """Return finite full-investment weights, falling back to equal weights."""
+        if n_assets <= 0:
+            raise ValueError("n_assets must be positive")
+
+        equal_weights = np.ones(n_assets, dtype=float) / n_assets
+        if weights is None or len(weights) != n_assets:
+            return equal_weights
+
+        weights_arr = np.asarray(weights, dtype=float)
+        weight_sum = float(weights_arr.sum())
+        if not np.isfinite(weights_arr).all() or abs(weight_sum) <= 1e-12:
+            return equal_weights
+        return weights_arr / weight_sum
 
     @staticmethod
     def historical_es(
@@ -89,7 +129,11 @@ class RiskEngine:
         confidence_level: float = 0.99,
     ) -> float:
         """Calculate Expected Shortfall via historical simulation."""
+        returns_df = RiskEngine.sanitize_returns(returns_df)
         portfolio_returns = returns_df.to_numpy() @ weights
+        portfolio_returns = portfolio_returns[np.isfinite(portfolio_returns)]
+        if portfolio_returns.size == 0:
+            raise ValueError("portfolio returns contain no finite values")
         var_threshold = np.percentile(
             portfolio_returns,
             (1.0 - confidence_level) * 100.0,
@@ -102,9 +146,83 @@ class RiskEngine:
     @staticmethod
     def _ensure_psd(cov: np.ndarray) -> np.ndarray:
         """Ensure covariance matrix is positive semi-definite."""
+        cov = np.asarray(cov, dtype=float)
+        if cov.ndim != 2 or cov.shape[0] != cov.shape[1]:
+            raise ValueError("covariance matrix must be square")
+        if not np.isfinite(cov).all():
+            raise ValueError("covariance matrix contains non-finite values")
+
+        cov = (cov + cov.T) / 2.0
         eigenvalues, eigenvectors = np.linalg.eigh(cov)
         eigenvalues = np.maximum(eigenvalues, 1e-8)
-        return eigenvectors @ np.diag(eigenvalues) @ eigenvectors.T
+        psd = eigenvectors @ np.diag(eigenvalues) @ eigenvectors.T
+        return (psd + psd.T) / 2.0
+
+    @staticmethod
+    def prepare_optimization_inputs(
+        returns_df: pd.DataFrame,
+        n_assets: int,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Build finite prior returns and covariance inputs for optimization."""
+        returns_df = RiskEngine.sanitize_returns(returns_df)
+        if len(returns_df) < 2:
+            raise ValueError(
+                "at least 2 complete finite training observations are required for covariance estimation"
+            )
+        if returns_df.shape[1] != n_assets:
+            raise ValueError("returns data asset count does not match tickers")
+
+        mean_vector = np.nan_to_num(
+            returns_df.mean().to_numpy(dtype=float),
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
+        cov_matrix = np.nan_to_num(
+            returns_df.cov().to_numpy(dtype=float),
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
+        if mean_vector.shape != (n_assets,):
+            raise ValueError("prior return vector has invalid shape")
+        if cov_matrix.shape != (n_assets, n_assets):
+            raise ValueError("covariance matrix has invalid shape")
+        if not np.isfinite(mean_vector).all():
+            raise ValueError("prior return vector contains non-finite values")
+
+        cov_matrix = RiskEngine._ensure_psd(cov_matrix)
+        return mean_vector, cov_matrix
+
+    @staticmethod
+    def _portfolio_return_moments(
+        returns_df: pd.DataFrame,
+        weights: np.ndarray,
+    ) -> Tuple[float, float]:
+        """Estimate daily portfolio log-return mean and standard deviation."""
+        returns_df = RiskEngine.sanitize_returns(returns_df)
+
+        mean_vector = np.nan_to_num(
+            returns_df.mean().to_numpy(),
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
+        cov_matrix = np.nan_to_num(
+            returns_df.cov().to_numpy(),
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
+        if not np.any(cov_matrix):
+            return float(weights @ mean_vector), 0.0
+
+        cov_matrix = RiskEngine._ensure_psd(cov_matrix)
+
+        portfolio_mean = float(weights @ mean_vector)
+        portfolio_variance = float(weights @ cov_matrix @ weights)
+        portfolio_std = float(np.sqrt(max(portfolio_variance, 0.0)))
+        return portfolio_mean, portfolio_std
 
     @staticmethod
     def monte_carlo_es(
@@ -116,16 +234,20 @@ class RiskEngine:
     ) -> float:
         """Calculate Expected Shortfall via Monte Carlo simulation."""
         rng = np.random.default_rng(random_seed)
-        mean_vector = returns_df.mean().to_numpy()
-        cov_matrix = returns_df.cov().to_numpy()
-        cov_matrix = RiskEngine._ensure_psd(cov_matrix)
-
-        simulated_returns = rng.multivariate_normal(
-            mean_vector,
-            cov_matrix,
-            size=n_simulations,
+        portfolio_mean, portfolio_std = RiskEngine._portfolio_return_moments(
+            returns_df,
+            weights,
         )
-        portfolio_returns = simulated_returns @ weights
+
+        if portfolio_std <= 1e-12:
+            portfolio_returns = np.full(n_simulations, portfolio_mean)
+        else:
+            portfolio_returns = rng.normal(
+                loc=portfolio_mean,
+                scale=portfolio_std,
+                size=n_simulations,
+            )
+
         var_threshold = np.percentile(
             portfolio_returns,
             (1.0 - confidence_level) * 100.0,
@@ -143,22 +265,24 @@ class RiskEngine:
         random_seed: int = 42,
     ) -> np.ndarray:
         """Generate multi-day Monte Carlo portfolio price paths for visualization."""
+        returns_df = RiskEngine.sanitize_returns(returns_df)
         rng = np.random.default_rng(random_seed)
         n_days = len(returns_df)
-        n_assets = returns_df.shape[1]
-        mean_vector = returns_df.mean().to_numpy()
-        cov_matrix = returns_df.cov().to_numpy()
-        cov_matrix = RiskEngine._ensure_psd(cov_matrix)
-
-        simulated_daily = rng.multivariate_normal(
-            mean_vector, cov_matrix, size=n_simulations * n_days
-        ).reshape(n_simulations, n_days, n_assets)
-
-        assert simulated_daily.shape == (n_simulations, n_days, n_assets), (
-            f"simulated_daily shape mismatch: {simulated_daily.shape}"
+        n_sample_paths = min(100, n_simulations)
+        portfolio_mean, portfolio_std = RiskEngine._portfolio_return_moments(
+            returns_df,
+            weights,
         )
 
-        portfolio_daily = np.einsum("ijk,k->ij", simulated_daily, weights)
+        if portfolio_std <= 1e-12:
+            portfolio_daily = np.full((n_sample_paths, n_days), portfolio_mean)
+        else:
+            portfolio_daily = rng.normal(
+                loc=portfolio_mean,
+                scale=portfolio_std,
+                size=(n_sample_paths, n_days),
+            )
+
         cum_returns = np.cumsum(portfolio_daily, axis=1)
         price_paths = 100.0 * np.exp(cum_returns)
         return price_paths
@@ -169,6 +293,7 @@ class RiskEngine:
         weights: np.ndarray,
     ) -> dict:
         """Compute cumulative returns, annualized volatility, and max drawdown."""
+        returns_df = RiskEngine.sanitize_returns(returns_df)
         portfolio_returns = returns_df.to_numpy() @ weights
         cum_returns = np.cumprod(1.0 + portfolio_returns) - 1.0
         ann_vol = float(portfolio_returns.std() * np.sqrt(252))
@@ -409,13 +534,10 @@ class RiskEngine:
             market_mode=request.market,
         )
         returns_df = self.compute_log_returns(price_df)
+        returns_df = self.sanitize_returns(returns_df)
 
         n_assets = len(request.tickers)
-        if request.weights and len(request.weights) == n_assets:
-            weights = np.asarray(request.weights, dtype=float)
-            weights = weights / weights.sum()
-        else:
-            weights = np.ones(n_assets) / n_assets
+        weights = self._normalize_weights(request.weights, n_assets)
 
         hist_es = self.historical_es(returns_df, weights, request.confidence_level)
         mc_es = self.monte_carlo_es(
@@ -424,10 +546,11 @@ class RiskEngine:
         paths = self.generate_mc_paths(
             returns_df, weights, n_simulations=request.mc_paths
         )
-        n_sample = min(100, paths.shape[0])
-        sample_paths = paths[:n_sample].tolist()
+        sample_paths = paths.tolist()
 
-        corr_matrix = returns_df.corr().to_numpy().tolist()
+        corr_matrix = returns_df.corr().to_numpy()
+        corr_matrix = np.nan_to_num(corr_matrix, nan=0.0, posinf=0.0, neginf=0.0)
+        np.fill_diagonal(corr_matrix, 1.0)
 
         abs_loss_hist = request.capital * request.leverage * abs(hist_es)
         abs_loss_mc = request.capital * request.leverage * abs(mc_es)
@@ -440,7 +563,7 @@ class RiskEngine:
             monte_carlo_es=mc_es,
             confidence_level=request.confidence_level,
             sample_paths=sample_paths,
-            correlation_matrix=corr_matrix,
+            correlation_matrix=corr_matrix.tolist(),
             source=self.fetcher.last_source,
             absolute_loss_historical=abs_loss_hist,
             absolute_loss_monte_carlo=abs_loss_mc,

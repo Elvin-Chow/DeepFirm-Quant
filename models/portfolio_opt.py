@@ -201,8 +201,31 @@ class BayesianOptimizer:
 
         weights = result.x
         weights = np.clip(weights, 0.0, effective_max)
-        weights /= np.sum(weights)
+        weight_sum = float(np.sum(weights))
+        if not np.isfinite(weights).all() or abs(weight_sum) <= 1e-12:
+            raise RuntimeError("optimization produced invalid weights")
+        weights /= weight_sum
         return weights
+
+    @staticmethod
+    def _normalize_prior_weights(
+        weights: Optional[List[float]],
+        n_assets: int,
+        max_weight: float,
+    ) -> Optional[np.ndarray]:
+        """Return normalized user weights, or None when they are not usable."""
+        if weights is None or len(weights) != n_assets:
+            return None
+
+        weights_arr = np.asarray(weights, dtype=float)
+        if not np.isfinite(weights_arr).all():
+            return None
+
+        weights_arr = np.clip(weights_arr, 0.0, float(max_weight))
+        weight_sum = float(weights_arr.sum())
+        if abs(weight_sum) <= 1e-12:
+            return None
+        return weights_arr / weight_sum
 
     def optimize_with_views(
         self,
@@ -238,11 +261,8 @@ class BayesianOptimizer:
             omega,
         )
 
-        if weights is not None and len(weights) == n_assets:
-            prior_weights = np.asarray(weights, dtype=float)
-            prior_weights = np.clip(prior_weights, 0.0, float(max_weight))
-            prior_weights /= prior_weights.sum()
-        else:
+        prior_weights = self._normalize_prior_weights(weights, n_assets, max_weight)
+        if prior_weights is None:
             prior_weights = self.optimize_weights(prior_returns_arr, cov_arr, risk_aversion, max_weight)
         posterior_weights = self.optimize_weights(posterior_returns, posterior_cov, risk_aversion, max_weight)
 
