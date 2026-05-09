@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect } fr
 import type { Lang } from "@/lib/i18n";
 
 const STORAGE_KEY = "dfq_language";
+const SUPPORTED_LANGS: Lang[] = ["en", "zh", "tc"];
 
 interface LanguageContextValue {
   lang: Lang;
@@ -17,7 +18,8 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLangState] = useState<Lang>("en");
 
   useEffect(() => {
-    const stored = (localStorage.getItem(STORAGE_KEY) as Lang) || "en";
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const stored = SUPPORTED_LANGS.includes(raw as Lang) ? (raw as Lang) : "en";
     setLangState(stored);
     document.documentElement.lang =
       stored === "zh" ? "zh-CN" : stored === "tc" ? "zh-TW" : "en";

@@ -9,7 +9,15 @@ export interface Preset {
   capital: number;
   leverage: number;
   mcPaths: number;
+  mlHorizon?: 1 | 5;
+  regimeModelType?: "kmeans" | "gaussian_mixture";
   maxWeight: number;
+  minWeight?: number;
+  turnoverPenalty?: number;
+  concentrationPenalty?: number;
+  oosGuardEnabled?: boolean;
+  allocationMode?: "smart" | "professional";
+  allowSandboxData?: boolean;
   backtestEnabled: boolean;
   testRatio: number;
   viewTicker: string;
@@ -37,7 +45,6 @@ function savePresets(presets: Preset[]) {
 }
 
 export function usePresets() {
-  // Fixed initial value to avoid hydration mismatch
   const [presets, setPresets] = useState<Preset[]>([]);
 
   useEffect(() => {

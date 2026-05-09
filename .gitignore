@@ -44,12 +44,19 @@ frontend.log
 # Local data & caches
 cache/
 data/
+*.parquet
+*.pkl
+*.joblib
 *.db
 *.sqlite
 *.sqlite3
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Secrets
 .env
+.env.*
 
 # Dev / internal docs (not for public repo)
 AGENTS.md

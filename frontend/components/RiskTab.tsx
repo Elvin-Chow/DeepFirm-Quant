@@ -10,11 +10,13 @@ import SectionHeader from "@/components/ui/SectionHeader";
 import Loading from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
 import ThemedTooltip from "@/components/charts/ThemedTooltip";
+import DataStatus from "@/components/ui/DataStatus";
 import {
   Activity,
   GitMerge,
   AlertTriangle,
   BarChart3,
+  Gauge,
   TrendingDown,
   Wind,
 } from "lucide-react";
@@ -22,6 +24,7 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  ReferenceDot,
   ResponsiveContainer,
   XAxis,
   YAxis,
@@ -42,8 +45,15 @@ export default function RiskTab({ data, loading, lang }: RiskTabProps) {
 
   const cumulativeChartData = data.performance_dates.map((date, i) => ({
     date,
-    return: (data.cumulative_returns[i] * 100).toFixed(2),
+    return: Number((data.cumulative_returns[i] * 100).toFixed(2)),
   }));
+  const latestReturnPoint =
+    cumulativeChartData.length > 0
+      ? cumulativeChartData[cumulativeChartData.length - 1]
+      : null;
+  const latestReturnLabel = latestReturnPoint
+    ? `${latestReturnPoint.return >= 0 ? "+" : ""}${latestReturnPoint.return.toFixed(1)}%`
+    : "";
 
   const tickers = data.tickers;
   const corrMatrix = data.correlation_matrix;
@@ -55,39 +65,44 @@ export default function RiskTab({ data, loading, lang }: RiskTabProps) {
   return (
     <div className="space-y-6">
       {/* Metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
         <MetricCard
           label={t(lang, "historicalES")}
           value={`${(data.historical_es * 100).toFixed(2)}%`}
           icon={AlertTriangle}
+          helpText={t(lang, "historicalESHelp")}
           accent
         />
         <MetricCard
           label={t(lang, "monteCarloES")}
           value={`${(data.monte_carlo_es * 100).toFixed(2)}%`}
           icon={BarChart3}
+          helpText={t(lang, "monteCarloESHelp")}
           accent
         />
         <MetricCard
           label={t(lang, "annVolatility")}
           value={`${(data.annualized_volatility * 100).toFixed(2)}%`}
           icon={Wind}
+          helpText={t(lang, "annVolatilityHelp")}
         />
         <MetricCard
           label={t(lang, "maxDrawdown")}
           value={`${(data.max_drawdown * 100).toFixed(2)}%`}
           icon={TrendingDown}
+          helpText={t(lang, "maxDrawdownHelp")}
           danger
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:gap-4">
         <MetricCard
           label={t(lang, "absLossHistorical")}
           value={`$${data.absolute_loss_historical.toLocaleString(undefined, {
             maximumFractionDigits: 0,
           })}`}
           icon={TrendingDown}
+          helpText={t(lang, "absLossHelp")}
           danger
         />
         <MetricCard
@@ -96,14 +111,26 @@ export default function RiskTab({ data, loading, lang }: RiskTabProps) {
             maximumFractionDigits: 0,
           })}`}
           icon={TrendingDown}
+          helpText={t(lang, "absLossHelp")}
           danger
         />
       </div>
 
       {/* Cumulative Returns Chart */}
       <GlassCard>
-        <SectionHeader icon={Activity} title={t(lang, "cumulativeReturns")} />
-        <div className="h-72">
+        <SectionHeader
+          icon={Activity}
+          title={t(lang, "cumulativeReturns")}
+          helpText={t(lang, "cumulativeReturnsHelp")}
+          right={
+            latestReturnPoint ? (
+              <span className="text-sm font-bold" style={{ color: accentHex }}>
+                {latestReturnLabel}
+              </span>
+            ) : null
+          }
+        />
+        <div className="h-60 sm:h-72">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={cumulativeChartData}>
               <defs>
@@ -124,10 +151,10 @@ export default function RiskTab({ data, loading, lang }: RiskTabProps) {
                 tick={{ fill: axisColor, fontSize: 10 }}
                 tickLine={false}
                 axisLine={{ stroke: gridColor }}
-                tickFormatter={(v: string) => `${v}%`}
+                tickFormatter={(v: number | string) => `${Number(v).toFixed(0)}%`}
               />
               <ThemedTooltip
-                formatter={(value: any) => [`${value}%`, t(lang, "cumulativeReturns")]}
+                formatter={(value: any) => [`${Number(value).toFixed(2)}%`, t(lang, "cumulativeReturns")]}
               />
               <Area
                 type="monotone"
@@ -136,6 +163,16 @@ export default function RiskTab({ data, loading, lang }: RiskTabProps) {
                 strokeWidth={2}
                 fill="url(#colorReturn)"
               />
+              {latestReturnPoint && (
+                <ReferenceDot
+                  x={latestReturnPoint.date}
+                  y={latestReturnPoint.return}
+                  r={4}
+                  fill={accentHex}
+                  stroke={isDark ? "#0b0c10" : "#fffdfa"}
+                  strokeWidth={2}
+                />
+              )}
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -143,12 +180,13 @@ export default function RiskTab({ data, loading, lang }: RiskTabProps) {
 
       {/* Correlation Heatmap */}
       <GlassCard>
-        <SectionHeader icon={GitMerge} title={t(lang, "assetCorrelation")} />
-        <div className="overflow-x-auto">
+        <SectionHeader icon={GitMerge} title={t(lang, "assetCorrelation")} helpText={t(lang, "assetCorrelationHelp")} />
+        <div className="overflow-x-auto pb-2">
           <div
             className="grid gap-1.5"
             style={{
-              gridTemplateColumns: `repeat(${tickers.length + 1}, minmax(64px, 1fr))`,
+              gridTemplateColumns: `repeat(${tickers.length + 1}, minmax(68px, 1fr))`,
+              minWidth: Math.max((tickers.length + 1) * 72, 320),
             }}
           >
             <div className="text-xs text-df-text-secondary/60 p-2" />
@@ -190,9 +228,12 @@ export default function RiskTab({ data, loading, lang }: RiskTabProps) {
         </div>
       </GlassCard>
 
-      <div className="text-xs text-df-text-secondary/60">
-        {t(lang, "dataSource")}: {data.source}
-      </div>
+      <DataStatus
+        lang={lang}
+        source={data.source}
+        sourceDetail={data.source_detail}
+        warnings={data.data_warnings}
+      />
     </div>
   );
 }

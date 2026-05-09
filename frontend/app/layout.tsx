@@ -5,7 +5,7 @@ import { ThemeProvider } from "@/hooks/useTheme";
 
 export const metadata: Metadata = {
   title: "DeepFirm Quant",
-  description: "Industrial-grade quant risk, alpha attribution, and Bayesian decision engine",
+  description: "Machine-learning-assisted quant risk control and Bayesian decision system",
 };
 
 export default function RootLayout({

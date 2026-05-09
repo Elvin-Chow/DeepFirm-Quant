@@ -4,6 +4,43 @@ All notable changes to the DeepFirm Quant project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [V3.0.0] - 2026-05-09
+
+### Added
+- **Methodology metadata:** optimization responses now expose `benchmark_symbol`, `benchmark_name`, `risk_free_rate_source`, and `methodology_warnings`.
+- **CI workflow:** added backend unit tests, TypeScript checks, and frontend build checks through GitHub Actions.
+- **Docker context controls:** added `.dockerignore` to exclude local caches, virtual environments, frontend build output, and runtime data files.
+- **Risk anomaly detection:** added a lightweight Isolation Forest anomaly detector for portfolio market states, exposed through `POST /api/v1/risk/anomaly`.
+- **Anomaly feature engineering:** added daily return, absolute return, 5-day and 20-day volatility, 20-day drawdown, rolling correlation, missing-data ratio, and price-jump features for current-state anomaly scoring.
+- **Risk Anomaly Alert card:** added a Risk tab alert panel showing anomaly score, localized alert level, detection status, and main reason explanations.
+- **Market regime detection:** added `POST /api/v1/risk/regime` and a Machine Learning tab panel for classifying the current portfolio regime as Normal, High Volatility, or Crisis with probabilities, risk multipliers, and recommended stress level.
+- **Regime feature engineering:** added portfolio return, rolling volatility, drawdown, correlation, and downside-volatility features for market-state clustering without changing the existing ES, Monte Carlo, OOS, or optimization workflows.
+- **ML risk forecast module:** added a Machine Learning tab module showing predicted VaR, predicted ES, risk score, risk level, model diagnostics, top risk drivers, and traditional ES comparison.
+- **Adaptive allocation policy:** added a smart allocation control layer that tunes maximum weight, minimum weight, turnover penalty, and concentration penalty from risk metrics, ML downside forecasts, anomaly alerts, and market-regime signals.
+- **Smart and Professional allocation modes:** added `allocation_mode` to the optimization request so users can choose automatic parameter tuning or keep full manual control of optimizer constraints.
+
+### Changed
+- **Backend service boundary:** moved schema definitions and analysis orchestration out of `backend/main.py` into dedicated schema and service modules while preserving the existing FastAPI routes.
+- **API contract hardening:** request models now reject duplicate tickers, invalid custom weights, and Black-Litterman views that reference assets outside the submitted ticker universe.
+- **Dependency reproducibility:** pinned backend dependency versions in `requirements.txt`.
+- **Benchmark documentation:** normalized mixed-market benchmark wording to `ACWI` across project documentation and UI changelog.
+- **Analysis speed:** unified analysis now reuses one aligned price matrix across risk, alpha, ML, anomaly, regime, and optimization stages, with independent analysis modules running in parallel where safe.
+- **Smart allocation reuse:** adaptive allocation now consumes precomputed ML, regime, and anomaly signals from the unified run instead of recalculating them inside the optimizer.
+- **Market data resilience:** Yahoo Finance HTTP 429 responses now trigger a process-wide cooldown, and complete local price caches are labeled as cache rather than stale fallback.
+- **Factor data policy:** Kenneth French factor data now uses persistent real-data caching, truncates attribution to real factor coverage when releases lag, and reports Alpha as unavailable instead of generating synthetic factor regressions when real coverage is insufficient.
+- **Data status UX:** price-data notices are localized and folded behind a compact details control to reduce visual noise.
+- **Multilingual anomaly explanations:** anomaly reasons now render as richer English, Simplified Chinese, and Traditional Chinese explanations in the frontend instead of terse raw reason labels.
+- **Alert-level localization:** Low, Medium, High, and Extreme alert levels now follow the active frontend language.
+- **Risk enhancement request handling:** anomaly and regime detection now degrade independently in the frontend so optional enhancement failures do not block the core risk, alpha, and optimization results.
+- **Decision guardrails:** portfolio recommendations now apply OOS-aware decision policies, blending raw Black-Litterman outputs with prior allocations when validation metrics indicate benchmark underperformance.
+- **Decision allocation controls:** optimization recommendations now expose effective minimum weight, turnover, and recommended weights so the frontend can distinguish raw optimizer output from execution-ready allocation advice.
+- **Decision explainability:** the Decision tab now surfaces policy labels, OOS underperformance warnings, raw-vs-recommended weight shifts, and per-asset action reasons for clearer rebalancing review.
+- **Allocation control UX:** the sidebar now consolidates the four optimizer controls behind a Smart / Professional mode switch, and the Decision tab shows the effective allocation policy with parameter values and reasons.
+
+### Fixed
+- **Log-return performance math:** cumulative returns, annualized return, max drawdown, OOS curves, and scoring inputs now compound log returns through `exp(cumsum(log_returns)) - 1` instead of treating log returns as simple returns.
+- **Risk-free rate provenance:** OOS optimization now reports whether the risk-free rate came from the request, `^IRX`, or the deterministic fallback.
+
 ## [2.2.0] - 2026-05-02
 
 ### Changed
@@ -76,7 +113,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - **Missing `source` in risk evaluation:** `RiskEngine.evaluate()` now correctly forwards `fetcher.last_source` into `RiskEvaluationResult.source`, so the Risk tab displays the actual data provider instead of "unknown".
 - **Missing `api_key` in standalone fetch endpoints:** `/fetch/us_equity` and `/fetch/hk_equity` now pass the payload `api_key` to `SmartFetcher`, enabling Tiingo failover on those routes as well.
-- **HK benchmark label desync:** `st.session_state["market"]` is now persisted immediately after market selection and restored on portfolio load, ensuring the OOS backtest chart labels the correct benchmark (SPY / ^HSI / VT).
+- **HK benchmark label desync:** market selection is now persisted immediately after selection and restored on portfolio load, ensuring the OOS backtest chart labels the correct benchmark (SPY / ^HSI / ACWI).
 - **Yahoo Finance batch download source override:** if batch download partially succeeds and some tickers fall back to synthetic sandbox data, `last_source` is restored to `yfinance` rather than incorrectly reporting `sandbox`.
 
 ## [1.0.0] - 2026-04-18
@@ -85,7 +122,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Multi-market equity support: Hong Kong stocks (`.HK` suffix) with dedicated HKEX calendar alignment.
 - Market selector in sidebar supporting `us`, `hk`, and `mixed` modes with ticker suffix validation.
 - Fixed FX normalization (`HKD/USD = 1/7.8`) for mixed-mode portfolios so HKD-denominated prices are converted to USD before return calculation.
-- Dynamic benchmark adaptation: `SPY` for US, `^HSI` for HK, and `VT` for mixed markets in OOS backtests.
+- Dynamic benchmark adaptation: `SPY` for US, `^HSI` for HK, and `ACWI` for mixed markets in OOS backtests.
 - HK ticker normalization (`_normalize_yf_symbol`) to strip leading zeros before `.HK` suffix for Yahoo Finance compatibility.
 - Per-instance rate limiting in Yahoo Finance fetcher (`_fetch_yf`) enforcing a minimum 2-second interval between calls to mitigate HTTP 429 errors.
 - Market-calendar-aware time-series aligner using official exchange calendars (`NYSE`, `HKEX`, `SSE`) via `pandas_market_calendars`.

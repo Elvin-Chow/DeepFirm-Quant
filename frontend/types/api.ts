@@ -5,6 +5,23 @@ export interface ViewSpec {
   confidence: number;
 }
 
+export interface MLModelDiagnostics {
+  model_name: string;
+  model_version: string;
+  model_health: "ok" | "degraded" | "fallback";
+  asof_date: string;
+  training_start: string;
+  training_end: string;
+  n_observations: number;
+  feature_count: number;
+  data_quality_score: number;
+  calibration_metrics: Record<string, number>;
+  warnings: string[];
+  fallback_used: boolean;
+  fallback_reason: string;
+  confidence: number;
+}
+
 export interface RiskEvaluationRequest {
   tickers: string[];
   start_date: string;
@@ -15,6 +32,7 @@ export interface RiskEvaluationRequest {
   capital?: number;
   leverage?: number;
   api_key?: string;
+  allow_sandbox_data?: boolean;
   market?: "us" | "hk" | "mixed";
 }
 
@@ -26,6 +44,8 @@ export interface RiskEvaluationResult {
   sample_paths: number[][];
   correlation_matrix: number[][];
   source: string;
+  source_detail?: string;
+  data_warnings?: string[];
   absolute_loss_historical: number;
   absolute_loss_monte_carlo: number;
   cumulative_returns: number[];
@@ -35,11 +55,94 @@ export interface RiskEvaluationResult {
   max_drawdown_date: string;
 }
 
+export interface RiskAnomalyRequest {
+  tickers: string[];
+  start_date: string;
+  end_date: string;
+  weights: number[];
+  api_key?: string;
+  allow_sandbox_data?: boolean;
+  market?: "us" | "hk" | "mixed";
+}
+
+export interface RiskAnomalyResult {
+  anomaly_score: number;
+  is_anomaly: boolean;
+  alert_level: "Low" | "Medium" | "High" | "Extreme";
+  main_reasons: string[];
+  reason_codes?: string[];
+  structured_reasons?: {
+    code: string;
+    category: "data_quality" | "market" | "model";
+    severity: "Low" | "Medium" | "High" | "Extreme";
+    message: string;
+  }[];
+  decision_impact?: "none" | "tighten_constraints" | "freeze_rebalance" | "force_oos_guard";
+  source: string;
+  source_detail?: string;
+  data_warnings?: string[];
+  diagnostics?: MLModelDiagnostics | null;
+}
+
+export interface RiskRegimeRequest {
+  tickers: string[];
+  start_date: string;
+  end_date: string;
+  weights: number[];
+  api_key?: string;
+  market?: "us" | "hk" | "mixed";
+  model_type?: "kmeans" | "gaussian_mixture";
+  allow_sandbox_data?: boolean;
+}
+
+export interface RiskRegimeResult {
+  current_regime: "Normal" | "High Volatility" | "Crisis";
+  smoothed_regime?: "Normal" | "High Volatility" | "Crisis";
+  regime_probabilities: Record<string, number>;
+  transition_confidence?: number;
+  persistence_days?: number;
+  volatility_multiplier: number;
+  correlation_multiplier: number;
+  recommended_stress_level: "Normal" | "High" | "Extreme";
+  source: string;
+  source_detail?: string;
+  data_warnings?: string[];
+  diagnostics?: MLModelDiagnostics | null;
+}
+
+export interface RiskMLForecastRequest {
+  tickers: string[];
+  start_date: string;
+  end_date: string;
+  weights: number[];
+  horizon?: 1 | 5;
+  confidence_level?: number;
+  api_key?: string;
+  allow_sandbox_data?: boolean;
+  market?: "us" | "hk" | "mixed";
+}
+
+export interface RiskMLForecastResult {
+  ml_var: number;
+  ml_es: number;
+  risk_score: number;
+  risk_level: "Low" | "Medium" | "High" | "Extreme";
+  model_name: string;
+  horizon: 1 | 5;
+  confidence_level: number;
+  top_features: string[];
+  source: string;
+  source_detail?: string;
+  data_warnings?: string[];
+  diagnostics?: MLModelDiagnostics | null;
+}
+
 export interface AlphaAnalysisRequest {
   tickers: string[];
   start_date: string;
   end_date: string;
   api_key?: string;
+  allow_sandbox_data?: boolean;
   market?: "us" | "hk" | "mixed";
 }
 
@@ -48,20 +151,33 @@ export interface FactorRegressionResult {
   beta_mkt: number;
   beta_smb: number;
   beta_hml: number;
+  beta_rmw: number;
+  beta_cma: number;
   t_stat_alpha: number;
   t_stat_mkt: number;
   t_stat_smb: number;
   t_stat_hml: number;
+  t_stat_rmw: number;
+  t_stat_cma: number;
   p_value_alpha: number;
   p_value_mkt: number;
   p_value_smb: number;
   p_value_hml: number;
+  p_value_rmw: number;
+  p_value_cma: number;
   r_squared: number;
   adj_r_squared: number;
   n_observations: number;
   source: string;
+  source_detail?: string;
+  data_warnings?: string[];
   factor_source: string;
   factor_is_synthetic: boolean;
+  alpha_status: "available" | "truncated";
+  alpha_sample_quality: "standard" | "low";
+  factor_available_through: string;
+  alpha_effective_start: string;
+  alpha_effective_end: string;
 }
 
 export interface PortfolioOptimizeRequest {
@@ -72,10 +188,37 @@ export interface PortfolioOptimizeRequest {
   risk_aversion?: number;
   weights: number[];
   max_weight?: number;
+  min_weight?: number;
+  turnover_penalty?: number;
+  concentration_penalty?: number;
+  oos_guard_enabled?: boolean;
+  allocation_mode?: "smart" | "professional";
   api_key?: string;
+  allow_sandbox_data?: boolean;
   backtest_enabled?: boolean;
   test_ratio?: number;
   market?: "us" | "hk" | "mixed";
+}
+
+export interface AllocationPolicyResult {
+  mode: "smart" | "professional";
+  max_weight: number;
+  min_weight: number;
+  turnover_penalty: number;
+  concentration_penalty: number;
+  confidence: number;
+  reasons: string[];
+  risk_level?: string;
+  regime?: string;
+  anomaly_level?: string;
+  anomaly_impact?: string;
+  annualized_volatility?: number;
+  max_drawdown?: number;
+  average_correlation?: number;
+  ml_asof?: string;
+  ml_confidence?: number;
+  regime_confidence?: number;
+  anomaly_confidence?: number;
 }
 
 export interface OptimizationResult {
@@ -84,19 +227,30 @@ export interface OptimizationResult {
   prior_weights: number[];
   posterior_returns: number[];
   posterior_weights: number[];
+  raw_posterior_weights: number[];
+  recommended_weights: number[];
+  decision_policy: "raw" | "balanced_blend" | "defensive_blend";
+  turnover: number;
+  effective_min_weight: number;
   risk_aversion: number;
   source: string;
+  source_detail?: string;
+  data_warnings?: string[];
   backtest_enabled: boolean;
   oos_dates: string[];
   oos_optimized_cum_returns: number[];
   oos_benchmark_cum_returns: number[];
+  oos_prior_cum_returns: number[];
   oos_optimized_ann_vol: number;
   oos_benchmark_ann_vol: number;
+  oos_prior_ann_vol: number;
   oos_optimized_max_drawdown: number;
   oos_benchmark_max_drawdown: number;
+  oos_prior_max_drawdown: number;
   oos_excess_return: number;
   oos_optimized_sharpe: number;
   oos_benchmark_sharpe: number;
+  oos_prior_sharpe: number;
   oos_optimized_ir: number;
   model_score: number;
   model_grade: string;
@@ -105,5 +259,34 @@ export interface OptimizationResult {
   model_score_alpha: number;
   model_score_stability: number;
   model_score_win_rate: number;
-  model_score_consistency: number;
+  allocation_policy?: AllocationPolicyResult | null;
+  benchmark_symbol: string;
+  benchmark_name: string;
+  risk_free_rate: number;
+  risk_free_rate_source: string;
+  methodology_warnings: string[];
+}
+
+export interface AnalysisRunRequest extends PortfolioOptimizeRequest {
+  confidence_level?: number;
+  mc_paths?: number;
+  capital?: number;
+  leverage?: number;
+  ml_horizon?: 1 | 5;
+  ml_confidence_level?: number;
+  regime_model_type?: "kmeans" | "gaussian_mixture";
+}
+
+export interface AnalysisRunResult {
+  risk: RiskEvaluationResult;
+  alpha?: FactorRegressionResult | null;
+  alpha_status?: "available" | "truncated" | "unavailable";
+  alpha_message?: string;
+  factor_available_through?: string | null;
+  alpha_effective_start?: string | null;
+  alpha_effective_end?: string | null;
+  optimization: OptimizationResult;
+  anomaly?: RiskAnomalyResult | null;
+  regime?: RiskRegimeResult | null;
+  ml_forecast?: RiskMLForecastResult | null;
 }

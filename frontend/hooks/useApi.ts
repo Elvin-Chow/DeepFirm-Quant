@@ -19,7 +19,16 @@ export async function postApi<T>(endpoint: string, payload: object): Promise<T> 
 
   if (!response.ok) {
     const text = await response.text();
-    throw new ApiError(response.status, text || `HTTP ${response.status}`);
+    let message = text || `HTTP ${response.status}`;
+    try {
+      const parsed = JSON.parse(text);
+      if (typeof parsed?.detail === "string") {
+        message = parsed.detail;
+      }
+    } catch {
+      message = text || `HTTP ${response.status}`;
+    }
+    throw new ApiError(response.status, message);
   }
 
   return response.json() as Promise<T>;

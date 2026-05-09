@@ -1,4 +1,5 @@
 import { LucideIcon } from "lucide-react";
+import HelpTip from "@/components/ui/HelpTip";
 
 interface MetricCardProps {
   label: string;
@@ -6,6 +7,7 @@ interface MetricCardProps {
   icon?: LucideIcon;
   accent?: boolean;
   danger?: boolean;
+  helpText?: string;
 }
 
 export default function MetricCard({
@@ -14,12 +16,13 @@ export default function MetricCard({
   icon: Icon,
   accent,
   danger,
+  helpText,
 }: MetricCardProps) {
   return (
-    <div className="glass-card p-4 flex items-center gap-4">
+    <div className="glass-card flex min-w-0 items-start gap-3 p-3 sm:items-center sm:gap-4 sm:p-4">
       {Icon && (
         <div
-          className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full sm:h-10 sm:w-10 ${
             danger
               ? "bg-df-danger/10 text-df-danger"
               : accent
@@ -30,10 +33,13 @@ export default function MetricCard({
           <Icon size={18} />
         </div>
       )}
-      <div>
-        <div className="text-xs text-df-text-secondary mb-0.5">{label}</div>
+      <div className="min-w-0 flex-1">
+        <div className="mb-0.5 flex min-w-0 items-start gap-1.5 text-xs leading-snug text-df-text-secondary">
+          <span className="min-w-0 break-words">{label}</span>
+          {helpText && <HelpTip text={helpText} />}
+        </div>
         <div
-          className={`text-lg font-bold ${
+          className={`break-words text-base font-bold leading-tight sm:text-lg ${
             danger ? "text-df-danger" : accent ? "text-df-accent" : "text-df-text"
           }`}
         >

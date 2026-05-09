@@ -2,9 +2,10 @@
 
 import logging
 import os
+import threading
 import time
-from datetime import date
-from typing import Any, Callable, Dict, List, Literal, Optional
+from datetime import date, datetime, time as datetime_time, timezone
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import akshare as ak
 import numpy as np
@@ -13,7 +14,7 @@ import requests
 import requests_cache
 import yfinance as yf
 from yfinance.exceptions import YFRateLimitError
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from data_pipeline.exceptions import DataFetcherError
 
@@ -47,25 +48,35 @@ class FetchResponse(BaseModel):
     end_date: date
     data: pd.DataFrame
 
-    model_config = {
-        "arbitrary_types_allowed": True,
-        "json_encoders": {pd.DataFrame: lambda df: df.to_dict(orient="records")},
-    }
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @field_serializer("data")
+    def serialize_data(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
+        return data.to_dict(orient="records")
 
 
 class SmartFetcher:
     """Fetch financial data from multiple sources with automatic failover."""
+
+    _yf_lock = threading.RLock()
+    _yf_last_call_time = 0.0
+    _yf_cooldown_until = 0.0
+    _yf_min_interval_seconds = 0.6
+    _yf_cooldown_seconds = 15.0
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         cache_name: str = "cache/http_cache",
         cache_expire_hours: int = 24,
+        allow_sandbox_data: bool = False,
     ) -> None:
         self.api_key = api_key
         self.last_source = "unknown"
+        self.last_source_detail = "unknown"
+        self.data_warnings: List[str] = []
+        self.allow_sandbox_data = allow_sandbox_data
         self.cache_expire_hours = cache_expire_hours
-        self._last_yf_call_time = 0.0
         self.cache_enabled = os.getenv("DFQ_DISABLE_CACHE", "").lower() not in {
             "1",
             "true",
@@ -115,6 +126,135 @@ class SmartFetcher:
         filename = f"{source}_{safe_symbol}_{start_date.isoformat()}_{end_date.isoformat()}.parquet"
         return os.path.join(self._result_cache_dir, filename)
 
+    def _price_cache_path(self, source: str, symbol: str) -> str:
+        """Build the symbol-level price cache path."""
+        if self._result_cache_dir is None:
+            raise RuntimeError("result cache is disabled")
+        safe_symbol = symbol.replace(".", "_").replace("/", "_")
+        filename = f"{source}_{safe_symbol}_prices.parquet"
+        return os.path.join(self._result_cache_dir, filename)
+
+    @staticmethod
+    def _normalize_price_frame(df: pd.DataFrame) -> pd.DataFrame:
+        """Return a cache-safe price frame with normalized dates and close prices."""
+        if df.empty:
+            return df.copy()
+
+        normalized = df.copy()
+        if "Date" not in normalized.columns:
+            normalized = normalized.reset_index()
+            if "Date" not in normalized.columns:
+                normalized = normalized.rename(columns={normalized.columns[0]: "Date"})
+
+        normalized["Date"] = pd.to_datetime(normalized["Date"], errors="coerce")
+        normalized["Date"] = normalized["Date"].dt.tz_localize(None).dt.normalize()
+
+        if "Close" not in normalized.columns and "Adj Close" in normalized.columns:
+            normalized["Close"] = normalized["Adj Close"]
+        if "Close" not in normalized.columns:
+            return pd.DataFrame(columns=["Date", "Close"])
+
+        normalized["Close"] = pd.to_numeric(normalized["Close"], errors="coerce")
+        normalized = normalized.dropna(subset=["Date", "Close"])
+        normalized = normalized.sort_values("Date")
+        normalized = normalized.drop_duplicates(subset=["Date"], keep="last")
+        return normalized.reset_index(drop=True)
+
+    @staticmethod
+    def _expected_cache_bounds(start_date: date, end_date: date) -> Tuple[pd.Timestamp, pd.Timestamp]:
+        """Return tolerant business-day bounds for cache coverage checks."""
+        business_days = pd.date_range(start_date, end_date, freq="B")
+        if len(business_days) == 0:
+            start_ts = pd.Timestamp(start_date)
+            end_ts = pd.Timestamp(end_date)
+        else:
+            start_ts = pd.Timestamp(business_days.min())
+            end_ts = pd.Timestamp(business_days.max())
+        return start_ts, end_ts
+
+    def _slice_cached_prices(
+        self,
+        df: pd.DataFrame,
+        start_date: date,
+        end_date: date,
+        allow_partial: bool,
+    ) -> Optional[Tuple[pd.DataFrame, bool]]:
+        """Return cached prices when they cover the requested window."""
+        normalized = self._normalize_price_frame(df)
+        if normalized.empty:
+            return None
+
+        start_ts = pd.Timestamp(start_date)
+        end_ts = pd.Timestamp(end_date)
+        filtered = normalized[
+            (normalized["Date"] >= start_ts) & (normalized["Date"] <= end_ts)
+        ].copy()
+        if len(filtered) < 2:
+            return None
+
+        expected_start, expected_end = self._expected_cache_bounds(start_date, end_date)
+        first_date = pd.Timestamp(filtered["Date"].min())
+        last_date = pd.Timestamp(filtered["Date"].max())
+        covers_start = first_date <= expected_start + pd.Timedelta(days=7)
+        covers_end = last_date >= expected_end - pd.Timedelta(days=7)
+        has_full_coverage = covers_start and covers_end
+        if has_full_coverage:
+            return filtered.reset_index(drop=True), False
+
+        expected_rows = max(2, len(pd.date_range(start_date, end_date, freq="B")))
+        enough_rows = len(filtered) >= max(2, int(expected_rows * 0.60))
+        if allow_partial and covers_start and enough_rows:
+            return filtered.reset_index(drop=True), True
+        return None
+
+    def _read_price_cache(
+        self,
+        source: str,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        allow_stale: bool = False,
+        allow_partial: bool = False,
+    ) -> Optional[Tuple[pd.DataFrame, bool, str]]:
+        """Read symbol-level or legacy exact-window cache data."""
+        if not self.cache_enabled or self._result_cache_dir is None:
+            return None
+
+        paths = [
+            self._price_cache_path(source, symbol),
+            self._result_cache_path(source, symbol, start_date, end_date),
+        ]
+        for path in paths:
+            if not os.path.exists(path):
+                continue
+            try:
+                mtime = os.path.getmtime(path)
+                is_expired = time.time() - mtime > self.cache_expire_hours * 3600
+                if is_expired and not allow_stale:
+                    continue
+                cached_df = pd.read_parquet(path)
+                sliced = self._slice_cached_prices(
+                    cached_df,
+                    start_date,
+                    end_date,
+                    allow_partial=allow_partial,
+                )
+                if sliced is None:
+                    continue
+                result_df, is_partial = sliced
+                provider = "unknown"
+                if "__provider" in cached_df.columns:
+                    providers = cached_df["__provider"].dropna().astype(str).unique()
+                    if len(providers) == 1:
+                        provider = providers[0]
+                    elif len(providers) > 1:
+                        provider = "mixed"
+                result_df = result_df.drop(columns=["__provider"], errors="ignore")
+                return result_df, bool(is_partial), provider
+            except Exception as exc:
+                logger.warning("price cache read skipped for %s: %s", symbol, exc)
+        return None
+
     def _read_result_cache(
         self,
         source: str,
@@ -123,18 +263,10 @@ class SmartFetcher:
         end_date: date,
     ) -> Optional[pd.DataFrame]:
         """Read a cached DataFrame if it exists and is not stale."""
-        if not self.cache_enabled or self._result_cache_dir is None:
+        cached = self._read_price_cache(source, symbol, start_date, end_date)
+        if cached is None:
             return None
-        path = self._result_cache_path(source, symbol, start_date, end_date)
-        if not os.path.exists(path):
-            return None
-        try:
-            mtime = os.path.getmtime(path)
-            if time.time() - mtime > self.cache_expire_hours * 3600:
-                return None
-            return pd.read_parquet(path)
-        except Exception:
-            return None
+        return cached[0]
 
     def _write_result_cache(
         self,
@@ -143,15 +275,159 @@ class SmartFetcher:
         symbol: str,
         start_date: date,
         end_date: date,
+        provider: str = "unknown",
     ) -> None:
         """Persist a DataFrame to the local result cache."""
         if not self.cache_enabled or self._result_cache_dir is None:
             return
-        path = self._result_cache_path(source, symbol, start_date, end_date)
         try:
-            df.to_parquet(path, index=False)
+            normalized = self._normalize_price_frame(df)
+            if normalized.empty:
+                return
+            normalized["__provider"] = provider
+
+            symbol_path = self._price_cache_path(source, symbol)
+            if os.path.exists(symbol_path):
+                try:
+                    existing_raw = pd.read_parquet(symbol_path)
+                    existing = self._normalize_price_frame(existing_raw)
+                    if "__provider" in existing_raw.columns:
+                        provider_map = (
+                            existing_raw[["Date", "__provider"]]
+                            .assign(Date=lambda frame: pd.to_datetime(frame["Date"], errors="coerce").dt.tz_localize(None).dt.normalize())
+                            .dropna(subset=["Date"])
+                            .drop_duplicates(subset=["Date"], keep="last")
+                        )
+                        existing = existing.merge(provider_map, on="Date", how="left")
+                    if "__provider" not in existing.columns:
+                        existing["__provider"] = "unknown"
+                    normalized = pd.concat([existing, normalized], ignore_index=True)
+                except Exception as exc:
+                    logger.warning("price cache merge skipped for %s: %s", symbol, exc)
+            normalized = normalized.sort_values("Date")
+            normalized = normalized.drop_duplicates(subset=["Date"], keep="last")
+            normalized.to_parquet(symbol_path, index=False)
+
+            exact_path = self._result_cache_path(source, symbol, start_date, end_date)
+            normalized.to_parquet(exact_path, index=False)
         except Exception as exc:
             logger.warning("result cache write skipped for %s: %s", symbol, exc)
+
+    def _mark_source(self, source: str, detail: str) -> None:
+        """Store the most recent data source metadata."""
+        self.last_source = source
+        self.last_source_detail = detail
+
+    def _append_warning(self, message: str) -> None:
+        """Append a warning once while preserving insertion order."""
+        if message not in self.data_warnings:
+            self.data_warnings.append(message)
+
+    @staticmethod
+    def _market_for_ticker(ticker: str) -> Literal["us_equity", "hk_equity"]:
+        """Resolve the fetcher market source for a listed ticker."""
+        return "hk_equity" if ticker.upper().endswith(".HK") else "us_equity"
+
+    @staticmethod
+    def _cache_detail(stale: bool, provider: str) -> Tuple[str, str]:
+        """Return normalized cache source and detail labels."""
+        clean_provider = provider if provider and provider != "unknown" else "yfinance"
+        source = "stale_cache" if stale else "cache"
+        prefix = "stale cache" if stale else "cache"
+        return source, f"{prefix} ({clean_provider})"
+
+    def _cache_response(
+        self,
+        market: Literal["us_equity", "hk_equity"],
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        allow_stale: bool = False,
+        allow_partial: bool = False,
+    ) -> Optional[FetchResponse]:
+        """Return a cache-backed fetch response when available."""
+        cached = self._read_price_cache(
+            market,
+            symbol,
+            start_date,
+            end_date,
+            allow_stale=allow_stale,
+            allow_partial=allow_partial,
+        )
+        if cached is None:
+            return None
+
+        df, stale, provider = cached
+        source, detail = self._cache_detail(stale, provider)
+        self._mark_source(source, detail)
+        if stale:
+            self._append_warning(
+                f"{symbol}: using cached prices because live data is temporarily unavailable"
+            )
+        return FetchResponse(
+            symbol=symbol,
+            source=market,
+            records=len(df),
+            start_date=start_date,
+            end_date=end_date,
+            data=df,
+        )
+
+    @classmethod
+    def _respect_yf_rate_limit(cls) -> None:
+        """Apply process-wide yfinance cooldown and minimum spacing."""
+        now = time.time()
+        if now < cls._yf_cooldown_until:
+            remaining = int(cls._yf_cooldown_until - now)
+            raise DataFetcherError(
+                message=f"yfinance is cooling down after rate limiting; retry in about {remaining} seconds",
+                symbol="batch",
+                source="yfinance",
+            )
+        elapsed = now - cls._yf_last_call_time
+        if elapsed < cls._yf_min_interval_seconds:
+            time.sleep(cls._yf_min_interval_seconds - elapsed)
+
+    @classmethod
+    def _respect_yahoo_spacing(cls) -> None:
+        """Apply lightweight spacing for direct Yahoo chart requests."""
+        now = time.time()
+        if now < cls._yf_cooldown_until:
+            remaining = int(cls._yf_cooldown_until - now)
+            raise DataFetcherError(
+                message=f"Yahoo Finance is cooling down after rate limiting; retry in about {remaining} seconds",
+                symbol="batch",
+                source="yahoo_chart",
+            )
+        elapsed = now - cls._yf_last_call_time
+        if elapsed < cls._yf_min_interval_seconds:
+            time.sleep(cls._yf_min_interval_seconds - elapsed)
+
+    @classmethod
+    def _register_yf_failure(cls, exc: Exception) -> None:
+        """Open a short cooldown after Yahoo rate limiting."""
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        message = str(exc).lower()
+        if (
+            isinstance(exc, YFRateLimitError)
+            or status_code == 429
+            or "too many requests" in message
+            or "rate limit" in message
+            or "429" in message
+        ):
+            cls._yf_cooldown_until = time.time() + cls._yf_cooldown_seconds
+
+    @staticmethod
+    def _format_error(source: str, exc: Exception) -> str:
+        """Format a provider error for diagnostics."""
+        return f"{source}: {exc}"
+
+    @staticmethod
+    def _unix_timestamp(day: date, end_of_day: bool = False) -> int:
+        """Convert a date into a UTC timestamp for Yahoo chart API calls."""
+        clock = datetime_time(23, 59, 59) if end_of_day else datetime_time(0, 0, 0)
+        return int(datetime.combine(day, clock, tzinfo=timezone.utc).timestamp())
 
     @staticmethod
     def _normalize_yf_symbol(symbol: str) -> str:
@@ -164,20 +440,136 @@ class SmartFetcher:
             return prefix + ".HK"
         return symbol
 
-    def _fetch_yf(self, symbol: str, start_date: date, end_date: date) -> pd.DataFrame:
-        """Primary fetch via Yahoo Finance with per-instance rate limiting."""
-        elapsed = time.time() - self._last_yf_call_time
-        if elapsed < 2.0:
-            time.sleep(2.0 - elapsed)
-
+    def _fetch_yahoo_chart(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+    ) -> pd.DataFrame:
+        """Fetch daily prices from Yahoo chart API without the yfinance cookie flow."""
         yf_symbol = self._normalize_yf_symbol(symbol)
-        ticker = yf.Ticker(yf_symbol)
-        df = ticker.history(start=start_date.isoformat(), end=end_date.isoformat())
-        self._last_yf_call_time = time.time()
-        df = df.reset_index()
-        if "Date" in df.columns:
-            df["Date"] = pd.to_datetime(df["Date"]).dt.tz_localize(None).dt.normalize()
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_symbol}"
+        params = {
+            "period1": self._unix_timestamp(start_date),
+            "period2": self._unix_timestamp(end_date, end_of_day=True),
+            "interval": "1d",
+            "events": "history",
+            "includeAdjustedClose": "true",
+        }
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            )
+        }
+        response = self._session.get(url, params=params, headers=headers, timeout=20)
+        response.raise_for_status()
+        payload = response.json()
+        chart = payload.get("chart", {})
+        error = chart.get("error")
+        if error:
+            raise DataFetcherError(
+                message=str(error.get("description") or error),
+                symbol=symbol,
+                source="yahoo_chart",
+            )
+        results = chart.get("result") or []
+        if not results:
+            raise DataFetcherError(
+                message="empty Yahoo chart response",
+                symbol=symbol,
+                source="yahoo_chart",
+            )
+        result = results[0]
+        timestamps = result.get("timestamp") or []
+        quote = (result.get("indicators", {}).get("quote") or [{}])[0]
+        adjclose = (result.get("indicators", {}).get("adjclose") or [{}])[0].get("adjclose")
+        closes = adjclose or quote.get("close") or []
+        if not timestamps or not closes:
+            raise DataFetcherError(
+                message="Yahoo chart response missing close prices",
+                symbol=symbol,
+                source="yahoo_chart",
+            )
+        df = pd.DataFrame(
+            {
+                "Date": pd.to_datetime(timestamps, unit="s", utc=True).tz_convert(None).normalize(),
+                "Close": closes,
+            }
+        )
+        df = self._normalize_price_frame(df)
+        if df.empty:
+            raise DataFetcherError(
+                message="Yahoo chart response contained no finite close prices",
+                symbol=symbol,
+                source="yahoo_chart",
+            )
         return df
+
+    def _fetch_yf(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        market: Literal["us_equity", "hk_equity"],
+    ) -> FetchResponse:
+        """Primary fetch via Yahoo Finance with process-wide rate limiting."""
+        with self._yf_lock:
+            cached = self._cache_response(market, symbol, start_date, end_date)
+            if cached is not None:
+                return cached
+
+            try:
+                self._respect_yahoo_spacing()
+                df = self._fetch_yahoo_chart(symbol, start_date, end_date)
+                SmartFetcher._yf_last_call_time = time.time()
+                self._write_result_cache(df, market, symbol, start_date, end_date, provider="yahoo_chart")
+                self._mark_source("yahoo_chart", "Yahoo Finance chart API")
+                return FetchResponse(
+                    symbol=symbol,
+                    source=market,
+                    records=len(df),
+                    start_date=start_date,
+                    end_date=end_date,
+                    data=df,
+                )
+            except Exception as chart_exc:
+                self._register_yf_failure(chart_exc)
+                logger.warning("Yahoo chart API failed for %s: %s", symbol, chart_exc)
+
+            self._respect_yf_rate_limit()
+            yf_symbol = self._normalize_yf_symbol(symbol)
+            try:
+                ticker = yf.Ticker(yf_symbol)
+                df = ticker.history(start=start_date.isoformat(), end=end_date.isoformat())
+                SmartFetcher._yf_last_call_time = time.time()
+            except Exception as exc:
+                self._register_yf_failure(exc)
+                raise DataFetcherError(
+                    message=f"yfinance failed for {symbol}: {exc}",
+                    symbol=symbol,
+                    source="yfinance",
+                    last_exception=exc,
+                ) from exc
+
+            df = self._normalize_price_frame(df)
+            if df.empty or "Close" not in df.columns:
+                raise DataFetcherError(
+                    message=f"yfinance returned no usable close prices for {symbol}",
+                    symbol=symbol,
+                    source="yfinance",
+                )
+
+            self._write_result_cache(df, market, symbol, start_date, end_date, provider="yfinance")
+            self._mark_source("yfinance", "yfinance")
+            return FetchResponse(
+                symbol=symbol,
+                source=market,
+                records=len(df),
+                start_date=start_date,
+                end_date=end_date,
+                data=df,
+            )
 
     def _fetch_tiingo(self, symbol: str, start_date: date, end_date: date) -> pd.DataFrame:
         """Fallback fetch via Tiingo REST API."""
@@ -232,12 +624,7 @@ class SmartFetcher:
         return df
 
     def _fetch_sandbox(self, symbol: str, start_date: date, end_date: date) -> pd.DataFrame:
-        """Final fallback: local cache or synthetic data."""
-        for source in ("us_equity", "hk_equity"):
-            cached = self._read_result_cache(source, symbol, start_date, end_date)
-            if cached is not None:
-                return cached
-
+        """Generate deterministic demo price data."""
         rng = np.random.default_rng(abs(hash(symbol)) % (2 ** 32))
         trading_days = pd.date_range(start_date, end_date, freq="B")
         drift = 0.0002
@@ -260,31 +647,36 @@ class SmartFetcher:
         end_date: date,
         market: Literal["us_equity", "hk_equity"],
     ) -> FetchResponse:
-        """Try yfinance -> Tiingo -> sandbox in sequence."""
-        # 1. Primary: yfinance
+        """Try cache -> yfinance -> Tiingo -> stale cache -> optional sandbox."""
+        cached = self._cache_response(market, symbol, start_date, end_date)
+        if cached is not None:
+            return cached
+
+        provider_errors: List[str] = []
+
         try:
-            df = self._fetch_yf(symbol, start_date, end_date)
-            if not df.empty and "Close" in df.columns:
-                self.last_source = "yfinance"
-                self._write_result_cache(df, market, symbol, start_date, end_date)
-                return FetchResponse(
-                    symbol=symbol,
-                    source=market,
-                    records=len(df),
-                    start_date=start_date,
-                    end_date=end_date,
-                    data=df,
-                )
+            return self._fetch_yf(symbol, start_date, end_date, market)
+        except DataFetcherError as exc:
+            provider_errors.append(self._format_error("yfinance", exc))
+            logger.warning("yfinance failed for %s: %s", symbol, exc)
         except Exception as exc:
+            provider_errors.append(self._format_error("yfinance", exc))
             logger.warning("yfinance failed for %s: %s", symbol, exc)
 
-        # 2. Fallback: Tiingo (only for US equities)
         if market == "us_equity" and self.api_key:
             try:
                 df = self._fetch_tiingo(symbol, start_date, end_date)
                 if not df.empty and "Close" in df.columns:
-                    self.last_source = "tiingo"
-                    self._write_result_cache(df, market, symbol, start_date, end_date)
+                    df = self._normalize_price_frame(df)
+                    self._write_result_cache(
+                        df,
+                        market,
+                        symbol,
+                        start_date,
+                        end_date,
+                        provider="tiingo",
+                    )
+                    self._mark_source("tiingo", "tiingo")
                     return FetchResponse(
                         symbol=symbol,
                         source=market,
@@ -294,11 +686,34 @@ class SmartFetcher:
                         data=df,
                     )
             except Exception as exc:
+                provider_errors.append(self._format_error("tiingo", exc))
                 logger.warning("tiingo failed for %s: %s", symbol, exc)
 
-        # 3. Final fallback: sandbox
+        stale_cached = self._cache_response(
+            market,
+            symbol,
+            start_date,
+            end_date,
+            allow_stale=True,
+            allow_partial=True,
+        )
+        if stale_cached is not None:
+            return stale_cached
+
+        if not self.allow_sandbox_data:
+            details = "; ".join(provider_errors) if provider_errors else "no live provider returned data"
+            raise DataFetcherError(
+                message=(
+                    f"Unable to fetch real price data for {symbol}. {details}. "
+                    "Enable Demo Fallback only for sandbox demonstrations."
+                ),
+                symbol=symbol,
+                source="smart_fetcher",
+            )
+
         df = self._fetch_sandbox(symbol, start_date, end_date)
-        self.last_source = "sandbox"
+        self._mark_source("sandbox", "sandbox demo")
+        self._append_warning(f"{symbol}: using sandbox demo prices")
         return FetchResponse(
             symbol=symbol,
             source=market,
@@ -326,6 +741,139 @@ class SmartFetcher:
         """Fetch Hong Kong equity historical prices with failover."""
         return self._smart_fetch(symbol, start_date, end_date, "hk_equity")
 
+    @staticmethod
+    def _extract_yf_close_series(batch_df: pd.DataFrame, yf_symbol: str) -> Optional[pd.Series]:
+        """Extract one close series from a yfinance batch response."""
+        if batch_df.empty:
+            return None
+        if isinstance(batch_df.columns, pd.MultiIndex):
+            candidates = [("Close", yf_symbol), (yf_symbol, "Close")]
+            for close_col in candidates:
+                if close_col in batch_df.columns:
+                    close_series = batch_df[close_col].dropna()
+                    return close_series if not close_series.empty else None
+            return None
+        if "Close" in batch_df.columns:
+            close_series = batch_df["Close"].dropna()
+            return close_series if not close_series.empty else None
+        return None
+
+    def _fetch_yf_batch(
+        self,
+        tickers: List[str],
+        start_date: date,
+        end_date: date,
+        cached_frames: Dict[str, pd.DataFrame],
+        source_labels: Dict[str, str],
+    ) -> None:
+        """Fetch missing tickers in one yfinance call under the global lock."""
+        with self._yf_lock:
+            still_missing: List[str] = []
+            for ticker in tickers:
+                market = self._market_for_ticker(ticker)
+                cached = self._read_price_cache(market, ticker, start_date, end_date)
+                if cached is None:
+                    still_missing.append(ticker)
+                    continue
+                df, stale, provider = cached
+                cached_frames[ticker] = df
+                source_labels[ticker] = self._cache_detail(stale, provider)[0]
+
+            if not still_missing:
+                return
+
+            chart_missing: List[str] = []
+            for ticker in still_missing:
+                market = self._market_for_ticker(ticker)
+                try:
+                    self._respect_yahoo_spacing()
+                    df = self._fetch_yahoo_chart(ticker, start_date, end_date)
+                    SmartFetcher._yf_last_call_time = time.time()
+                    self._write_result_cache(
+                        df,
+                        market,
+                        ticker,
+                        start_date,
+                        end_date,
+                        provider="yahoo_chart",
+                    )
+                    cached_frames[ticker] = df
+                    source_labels[ticker] = "yahoo_chart"
+                except Exception as exc:
+                    self._register_yf_failure(exc)
+                    logger.warning("Yahoo chart API failed for %s: %s", ticker, exc)
+                    chart_missing.append(ticker)
+
+            if not chart_missing:
+                return
+
+            self._respect_yf_rate_limit()
+            normalized_symbols = [self._normalize_yf_symbol(ticker) for ticker in chart_missing]
+            try:
+                batch_df = yf.download(
+                    normalized_symbols,
+                    start=start_date.isoformat(),
+                    end=end_date.isoformat(),
+                    progress=False,
+                    auto_adjust=False,
+                    group_by="column",
+                    threads=False,
+                )
+                SmartFetcher._yf_last_call_time = time.time()
+            except Exception as exc:
+                self._register_yf_failure(exc)
+                raise DataFetcherError(
+                    message=f"yfinance batch download failed: {exc}",
+                    symbol=",".join(chart_missing),
+                    source="yfinance",
+                    last_exception=exc,
+                ) from exc
+
+            if batch_df.empty:
+                raise DataFetcherError(
+                    message="yfinance batch download returned no data",
+                    symbol=",".join(chart_missing),
+                    source="yfinance",
+                )
+
+            for ticker, yf_symbol in zip(chart_missing, normalized_symbols):
+                close_series = self._extract_yf_close_series(batch_df, yf_symbol)
+                if close_series is None:
+                    continue
+                df = pd.DataFrame(
+                    {
+                        "Date": pd.to_datetime(close_series.index).tz_localize(None).normalize(),
+                        "Close": close_series.values,
+                    }
+                )
+                market = self._market_for_ticker(ticker)
+                self._write_result_cache(
+                    df,
+                    market,
+                    ticker,
+                    start_date,
+                    end_date,
+                    provider="yfinance",
+                )
+                cached_frames[ticker] = df
+                source_labels[ticker] = "yfinance"
+
+    def _mark_batch_source(self, source_labels: Dict[str, str]) -> None:
+        """Summarize per-ticker sources into response-level source metadata."""
+        if not source_labels:
+            self._mark_source("unknown", "unknown")
+            return
+        unique_sources = sorted(set(source_labels.values()))
+        if len(unique_sources) == 1:
+            source = unique_sources[0]
+            detail = self._cache_detail(source == "stale_cache", "yfinance")[1] if source in {
+                "cache",
+                "stale_cache",
+            } else source
+            self._mark_source(source, detail)
+            return
+        self._mark_source("mixed", ", ".join(unique_sources))
+
     def fetch_equity_batch(
         self,
         tickers: List[str],
@@ -334,19 +882,25 @@ class SmartFetcher:
     ) -> pd.DataFrame:
         """Fetch multiple equity prices with batch download and per-ticker failover."""
         cached_frames: Dict[str, pd.DataFrame] = {}
+        source_labels: Dict[str, str] = {}
         missing_tickers: List[str] = []
 
         for ticker in tickers:
-            for market in ("us_equity", "hk_equity"):
-                cached = self._read_result_cache(market, ticker, start_date, end_date)
-                if cached is not None:
-                    cached_frames[ticker] = cached
-                    break
+            market = self._market_for_ticker(ticker)
+            cached = self._read_price_cache(market, ticker, start_date, end_date)
+            if cached is not None:
+                df, stale, provider = cached
+                cached_frames[ticker] = df
+                source_labels[ticker] = self._cache_detail(stale, provider)[0]
+                if stale:
+                    self._append_warning(
+                        f"{ticker}: using cached prices because live data is temporarily unavailable"
+                    )
             else:
                 missing_tickers.append(ticker)
 
         if not missing_tickers:
-            self.last_source = "cache"
+            self._mark_batch_source(source_labels)
             frames = []
             for ticker, df in cached_frames.items():
                 sub = df.set_index("Date")[["Close"]].rename(columns={"Close": ticker})
@@ -356,50 +910,29 @@ class SmartFetcher:
             combined.columns = pd.MultiIndex.from_product([["Close"], combined.columns])
             return combined
 
-        # Track the best source achieved in this batch so fallback does not downgrade it
-        batch_best_source = None
-
-        # Attempt a single yfinance batch download to minimize HTTP requests
         if missing_tickers:
             try:
-                normalized = [self._normalize_yf_symbol(t) for t in missing_tickers]
-                batch_df = yf.download(
-                    normalized,
-                    start=start_date.isoformat(),
-                    end=end_date.isoformat(),
-                    progress=False,
-                    auto_adjust=False,
+                self._fetch_yf_batch(
+                    missing_tickers,
+                    start_date,
+                    end_date,
+                    cached_frames,
+                    source_labels,
                 )
-                if not batch_df.empty:
-                    for ticker in missing_tickers:
-                        norm = self._normalize_yf_symbol(ticker)
-                        close_col = ("Close", norm)
-                        if close_col not in batch_df.columns:
-                            continue
-                        close_series = batch_df[close_col].dropna()
-                        if close_series.empty:
-                            continue
-                        df = pd.DataFrame({
-                            "Date": pd.to_datetime(close_series.index).tz_localize(None).normalize(),
-                            "Close": close_series.values,
-                        })
-                        market = "hk_equity" if ticker.upper().endswith(".HK") else "us_equity"
-                        self._write_result_cache(df, market, ticker, start_date, end_date)
-                        cached_frames[ticker] = df
-                    batch_best_source = "yfinance"
-                    self.last_source = "yfinance"
+            except DataFetcherError as exc:
+                logger.warning("yfinance batch download failed: %s", exc)
             except Exception as exc:
                 logger.warning("yfinance batch download failed: %s", exc)
 
-        # Fallback: per-ticker smart fetch for any remaining missing tickers
         series_list: List[pd.Series] = []
         for ticker in tickers:
             if ticker in cached_frames:
                 df = cached_frames[ticker]
             else:
-                market = "hk_equity" if ticker.upper().endswith(".HK") else "us_equity"
+                market = self._market_for_ticker(ticker)
                 response = self._smart_fetch(ticker, start_date, end_date, market)
                 df = response.data
+                source_labels[ticker] = self.last_source
 
             if "Close" not in df.columns:
                 raise DataFetcherError(
@@ -416,9 +949,7 @@ class SmartFetcher:
             )
             series_list.append(prices)
 
-        # Restore the best source if a fallback pushed it down to sandbox
-        if batch_best_source and batch_best_source != "sandbox" and self.last_source == "sandbox":
-            self.last_source = batch_best_source
+        self._mark_batch_source(source_labels)
 
         aligned = pd.concat([s.to_frame() for s in series_list], axis=1)
         aligned.index = pd.to_datetime(aligned.index).tz_localize(None).normalize()

@@ -16,7 +16,7 @@ export default function GradientButton({
   type = "button",
 }: GradientButtonProps) {
   const base =
-    "w-full py-3 rounded-full font-semibold text-sm transition-all click-press";
+    "min-h-11 w-full rounded-full px-4 py-3 text-sm font-semibold transition-all click-press";
 
   const styles =
     variant === "primary"

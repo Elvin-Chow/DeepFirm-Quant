@@ -37,6 +37,17 @@ body {
   color: var(--df-text);
   font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
   transition: background-color 0.4s ease, color 0.4s ease;
+  overflow-x: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  width: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
 }
 
 h1,
@@ -102,6 +113,29 @@ h3,
     box-shadow 0.4s ease;
 }
 
+.scrollbar-none {
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .glass-card {
+    border-radius: 1rem;
+  }
+
+  .hover-lift:hover {
+    transform: none;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+}
+
 /* Gradient text utility */
 .gradient-text {
   color: transparent;
@@ -126,6 +160,15 @@ html.dark .df-control {
 html.dark .df-control:focus {
   border-color: rgba(255, 255, 255, 0.22);
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
+}
+
+.recharts-wrapper:focus,
+.recharts-wrapper *:focus,
+.recharts-wrapper *:focus-visible,
+.recharts-surface:focus,
+.recharts-surface *:focus,
+.recharts-surface *:focus-visible {
+  outline: none !important;
 }
 
 /* Inactive pill buttons */

@@ -9,6 +9,7 @@ import SectionHeader from "@/components/ui/SectionHeader";
 import Loading from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
 import ThemedTooltip from "@/components/charts/ThemedTooltip";
+import DataStatus from "@/components/ui/DataStatus";
 import { AlertTriangle, BarChart3, Table2, Ruler, Eye, BookOpen } from "lucide-react";
 import {
   Bar,
@@ -24,6 +25,12 @@ interface AlphaTabProps {
   data: FactorRegressionResult | null;
   loading: boolean;
   lang: Lang;
+  market: string;
+  status?: "available" | "truncated" | "unavailable";
+  message?: string;
+  factorAvailableThrough?: string | null;
+  effectiveStart?: string | null;
+  effectiveEnd?: string | null;
 }
 
 type ProvenanceFields = FactorRegressionResult & {
@@ -37,16 +44,33 @@ function resolveSource(value: unknown, fallback = "unknown"): string {
   return typeof value === "string" && value.trim() ? value : fallback;
 }
 
-export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
+export default function AlphaTab({
+  data,
+  loading,
+  lang,
+  market,
+  status,
+  message,
+  factorAvailableThrough,
+  effectiveStart,
+  effectiveEnd,
+}: AlphaTabProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
   if (loading) return <Loading />;
-  if (!data) return <EmptyState text={t(lang, "emptyAlpha")} />;
+  if (!data) {
+    const unavailableMessage = message || t(lang, "alphaUnavailableMessage");
+    const hasUnavailableDetail = Boolean(message || factorAvailableThrough);
+    return <EmptyState text={hasUnavailableDetail ? unavailableMessage : t(lang, "emptyAlpha")} />;
+  }
 
   const provenance = data as ProvenanceFields;
   const priceSource = resolveSource(
-    provenance.source || provenance.price_data_source || provenance.priceSource
+    provenance.source_detail ||
+      provenance.source ||
+      provenance.price_data_source ||
+      provenance.priceSource
   );
   const factorSource = resolveSource(
     provenance.factor_source ||
@@ -56,10 +80,12 @@ export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
   );
 
   const metrics = [
-    { label: "Alpha", value: data.alpha, p: data.p_value_alpha },
-    { label: "Mkt-RF", value: data.beta_mkt, p: data.p_value_mkt },
-    { label: "SMB", value: data.beta_smb, p: data.p_value_smb },
-    { label: "HML", value: data.beta_hml, p: data.p_value_hml },
+    { label: "Alpha", value: data.alpha, tStat: data.t_stat_alpha, p: data.p_value_alpha },
+    { label: "Mkt-RF", value: data.beta_mkt, tStat: data.t_stat_mkt, p: data.p_value_mkt },
+    { label: "SMB", value: data.beta_smb, tStat: data.t_stat_smb, p: data.p_value_smb },
+    { label: "HML", value: data.beta_hml, tStat: data.t_stat_hml, p: data.p_value_hml },
+    { label: "RMW", value: data.beta_rmw ?? 0, tStat: data.t_stat_rmw ?? 0, p: data.p_value_rmw ?? 1 },
+    { label: "CMA", value: data.beta_cma ?? 0, tStat: data.t_stat_cma ?? 0, p: data.p_value_cma ?? 1 },
   ];
 
   const barData = metrics.map((m) => ({
@@ -75,8 +101,36 @@ export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
 
   return (
     <div className="space-y-6">
+      {(status === "truncated" || data.alpha_status === "truncated") && (
+        <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-3 text-sm text-amber-700 dark:text-amber-200 sm:px-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+            <span>
+              {t(lang, "alphaCoverageTruncated")}{" "}
+              {factorAvailableThrough || data.factor_available_through}
+              {effectiveStart || data.alpha_effective_start ? (
+                <>
+                  {" "}
+                  {t(lang, "alphaEffectiveWindow")}:{" "}
+                  {effectiveStart || data.alpha_effective_start} - {effectiveEnd || data.alpha_effective_end}
+                </>
+              ) : null}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {data.alpha_sample_quality === "low" && (
+        <div className="rounded-lg border border-sky-400/30 bg-sky-400/10 px-3 py-3 text-sm text-sky-700 dark:text-sky-200 sm:px-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+            <span>{t(lang, "alphaLowSampleWarning")}</span>
+          </div>
+        </div>
+      )}
+
       {data.factor_is_synthetic && (
-        <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-200">
+        <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-3 text-sm text-amber-700 dark:text-amber-200 sm:px-4">
           <div className="flex items-start gap-3">
             <AlertTriangle size={18} className="mt-0.5 shrink-0" />
             <span>{t(lang, "syntheticFactorWarning")}</span>
@@ -84,10 +138,19 @@ export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
         </div>
       )}
 
+      {market !== "us" && (
+        <div className="rounded-lg border border-sky-400/30 bg-sky-400/10 px-3 py-3 text-sm text-sky-700 dark:text-sky-200 sm:px-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+            <span>{t(lang, "ff5ProxyWarning")}</span>
+          </div>
+        </div>
+      )}
+
       {/* Factor Attribution Chart */}
       <GlassCard>
-        <SectionHeader icon={BarChart3} title={t(lang, "factorAttribution")} />
-        <div className="h-72">
+        <SectionHeader icon={BarChart3} title={t(lang, "factorAttribution")} helpText={t(lang, "factorAttributionHelp")} />
+        <div className="h-60 sm:h-72">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={barData}>
               <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
@@ -121,9 +184,50 @@ export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
 
       {/* Regression Metrics Table */}
       <GlassCard>
-        <SectionHeader icon={Table2} title={t(lang, "regressionMetrics")} />
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <SectionHeader icon={Table2} title={t(lang, "regressionMetrics")} helpText={t(lang, "regressionMetricsHelp")} />
+        <div className="grid gap-3 sm:hidden">
+          {metrics.map((m) => (
+            <div
+              key={m.label}
+              className="rounded-2xl border border-df-border bg-df-surface-solid/20 p-3"
+            >
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="font-semibold text-df-text">{m.label}</div>
+                <span
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                    m.p < 0.05
+                      ? "bg-df-accent/10 text-df-accent"
+                      : "bg-df-surface-solid/30 text-df-text-secondary"
+                  }`}
+                >
+                  {m.p < 0.05 ? t(lang, "significant") : t(lang, "notSignificant")}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-3 text-xs">
+                <div>
+                  <div className="text-df-text-secondary">{t(lang, "coefficient")}</div>
+                  <div className="mt-1 font-mono font-semibold text-df-text">
+                    {m.value.toFixed(4)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-df-text-secondary">{t(lang, "tStat")}</div>
+                  <div className="mt-1 font-mono font-semibold text-df-text">
+                    {m.tStat.toFixed(2)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-df-text-secondary">{t(lang, "pValue")}</div>
+                  <div className="mt-1 font-mono font-semibold text-df-text">
+                    {m.p.toFixed(4)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="hidden overflow-x-auto sm:block">
+          <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr className="text-df-text-secondary border-b border-df-border">
                 <th className="text-left py-3 px-2">{t(lang, "factor")}</th>
@@ -144,13 +248,7 @@ export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
                     {m.value.toFixed(4)}
                   </td>
                   <td className="text-right py-3 px-2 font-mono">
-                    {m.label === "Alpha"
-                      ? data.t_stat_alpha.toFixed(2)
-                      : m.label === "Mkt-RF"
-                      ? data.t_stat_mkt.toFixed(2)
-                      : m.label === "SMB"
-                      ? data.t_stat_smb.toFixed(2)
-                      : data.t_stat_hml.toFixed(2)}
+                    {m.tStat.toFixed(2)}
                   </td>
                   <td className="text-right py-3 px-2 font-mono">{m.p.toFixed(4)}</td>
                   <td className="text-right py-3 px-2">
@@ -179,12 +277,13 @@ export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
       </GlassCard>
 
       {/* Bottom Metrics */}
-      <div className="grid grid-cols-3 gap-4">
-        <MetricCard label="R²" value={data.r_squared.toFixed(4)} icon={Ruler} />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 md:gap-4">
+        <MetricCard label="R²" value={data.r_squared.toFixed(4)} icon={Ruler} helpText={t(lang, "rSquaredHelp")} />
         <MetricCard
           label={t(lang, "adjRSquared")}
           value={data.adj_r_squared.toFixed(4)}
           icon={Ruler}
+          helpText={t(lang, "adjRSquaredHelp")}
         />
         <MetricCard
           label={t(lang, "observations")}
@@ -193,14 +292,13 @@ export default function AlphaTab({ data, loading, lang }: AlphaTabProps) {
         />
       </div>
 
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-df-text-secondary/60">
-        <span>
-          {t(lang, "priceDataSource")}: {priceSource}
-        </span>
-        <span>
-          {t(lang, "factorDataSource")}: {factorSource}
-        </span>
-      </div>
+      <DataStatus
+        lang={lang}
+        source={priceSource}
+        sourceDetail={priceSource}
+        factorSource={factorSource}
+        warnings={data.data_warnings}
+      />
     </div>
   );
 }
