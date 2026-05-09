@@ -61,8 +61,10 @@ class SmartFetcher:
     _yf_lock = threading.RLock()
     _yf_last_call_time = 0.0
     _yf_cooldown_until = 0.0
+    _yahoo_chart_cooldown_until = 0.0
     _yf_min_interval_seconds = 0.6
     _yf_cooldown_seconds = 15.0
+    _yahoo_chart_cooldown_seconds = 15.0
 
     def __init__(
         self,
@@ -392,8 +394,8 @@ class SmartFetcher:
     def _respect_yahoo_spacing(cls) -> None:
         """Apply lightweight spacing for direct Yahoo chart requests."""
         now = time.time()
-        if now < cls._yf_cooldown_until:
-            remaining = int(cls._yf_cooldown_until - now)
+        if now < cls._yahoo_chart_cooldown_until:
+            remaining = int(cls._yahoo_chart_cooldown_until - now)
             raise DataFetcherError(
                 message=f"Yahoo Finance is cooling down after rate limiting; retry in about {remaining} seconds",
                 symbol="batch",
@@ -404,19 +406,32 @@ class SmartFetcher:
             time.sleep(cls._yf_min_interval_seconds - elapsed)
 
     @classmethod
-    def _register_yf_failure(cls, exc: Exception) -> None:
-        """Open a short cooldown after Yahoo rate limiting."""
+    def _is_rate_limit_error(cls, exc: Exception) -> bool:
+        """Return whether an exception represents provider-side throttling."""
         response = getattr(exc, "response", None)
         status_code = getattr(response, "status_code", None)
         message = str(exc).lower()
-        if (
+        return (
             isinstance(exc, YFRateLimitError)
             or status_code == 429
             or "too many requests" in message
             or "rate limit" in message
             or "429" in message
-        ):
+        )
+
+    @classmethod
+    def _register_yf_failure(cls, exc: Exception) -> None:
+        """Open a short cooldown after yfinance rate limiting."""
+        if cls._is_rate_limit_error(exc):
             cls._yf_cooldown_until = time.time() + cls._yf_cooldown_seconds
+
+    @classmethod
+    def _register_yahoo_chart_failure(cls, exc: Exception) -> None:
+        """Open a short cooldown after direct Yahoo chart throttling."""
+        if cls._is_rate_limit_error(exc):
+            cls._yahoo_chart_cooldown_until = (
+                time.time() + cls._yahoo_chart_cooldown_seconds
+            )
 
     @staticmethod
     def _format_error(source: str, exc: Exception) -> str:
@@ -534,7 +549,7 @@ class SmartFetcher:
                     data=df,
                 )
             except Exception as chart_exc:
-                self._register_yf_failure(chart_exc)
+                self._register_yahoo_chart_failure(chart_exc)
                 logger.warning("Yahoo chart API failed for %s: %s", symbol, chart_exc)
 
             self._respect_yf_rate_limit()
@@ -800,7 +815,7 @@ class SmartFetcher:
                     cached_frames[ticker] = df
                     source_labels[ticker] = "yahoo_chart"
                 except Exception as exc:
-                    self._register_yf_failure(exc)
+                    self._register_yahoo_chart_failure(exc)
                     logger.warning("Yahoo chart API failed for %s: %s", ticker, exc)
                     chart_missing.append(ticker)
 

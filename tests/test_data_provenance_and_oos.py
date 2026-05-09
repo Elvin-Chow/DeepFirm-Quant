@@ -164,6 +164,7 @@ class FactorProvenanceTests(unittest.TestCase):
 class FetcherCacheTests(unittest.TestCase):
     def setUp(self) -> None:
         SmartFetcher._yf_cooldown_until = 0.0
+        SmartFetcher._yahoo_chart_cooldown_until = 0.0
         SmartFetcher._yf_last_call_time = 0.0
 
     def test_runtime_cache_can_be_disabled_by_environment(self) -> None:
@@ -261,25 +262,31 @@ class FetcherCacheTests(unittest.TestCase):
         self.assertIn("cached prices", " ".join(fetcher.data_warnings))
         self.assertGreaterEqual(response.records, 13)
 
-    def test_yahoo_chart_http_429_opens_cooldown_and_skips_yfinance(self) -> None:
+    def test_yahoo_chart_http_429_falls_back_to_yfinance(self) -> None:
         response = requests.Response()
         response.status_code = 429
         error = requests.exceptions.HTTPError("429 Too Many Requests", response=response)
+        prices = pd.DataFrame(
+            {"Close": np.linspace(100.0, 110.0, 22)},
+            index=pd.date_range("2026-01-01", periods=22, freq="B"),
+        )
 
         with TemporaryDirectory() as tmp_dir:
             fetcher = SmartFetcher(cache_name=f"{tmp_dir}/http_cache")
 
             with patch.object(fetcher, "_fetch_yahoo_chart", side_effect=error):
                 with patch("data_pipeline.fetcher.yf.Ticker") as ticker_cls:
-                    with self.assertRaisesRegex(DataFetcherError, "Unable to fetch real price data"):
-                        fetcher.fetch_us_equity(
-                            "AAA",
-                            date(2026, 1, 1),
-                            date(2026, 1, 31),
-                        )
-                    ticker_cls.assert_not_called()
+                    ticker_cls.return_value.history.return_value = prices
+                    fetcher.fetch_us_equity(
+                        "AAA",
+                        date(2026, 1, 1),
+                        date(2026, 1, 31),
+                    )
+                    ticker_cls.assert_called_once()
 
-        self.assertGreater(SmartFetcher._yf_cooldown_until, 0.0)
+        self.assertEqual(fetcher.last_source, "yfinance")
+        self.assertEqual(SmartFetcher._yf_cooldown_until, 0.0)
+        self.assertGreater(SmartFetcher._yahoo_chart_cooldown_until, 0.0)
 
     def test_sandbox_data_requires_opt_in(self) -> None:
         with TemporaryDirectory() as tmp_dir:

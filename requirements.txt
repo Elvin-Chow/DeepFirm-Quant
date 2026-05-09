@@ -4,7 +4,7 @@ pydantic==2.12.4
 pandas==2.3.3
 numpy==2.3.5
 scipy==1.16.3
-yfinance==0.2.57
+yfinance==1.2.2
 akshare==1.18.55
 pandas_market_calendars==5.3.2
 scikit-learn==1.8.0
