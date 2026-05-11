@@ -2,8 +2,7 @@
 
 import logging
 import os
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional
+from typing import Optional
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -43,18 +42,10 @@ allocation_policy_engine = analysis_service.allocation_policy_engine
 crisis_warning_service = analysis_service.crisis_warning_service
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Manage application lifespan events."""
-    crisis_warning_service.load_artifacts()
-    yield
-
-
 app = FastAPI(
     title="DeepFirm Quant",
     description="Industrial-grade quant risk and decision engine",
     version="3.5.0",
-    lifespan=lifespan,
 )
 
 origins_env = os.getenv("ALLOW_ORIGINS")
