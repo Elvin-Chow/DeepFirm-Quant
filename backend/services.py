@@ -1,6 +1,7 @@
 """Backend orchestration services for portfolio analysis."""
 
 import asyncio
+import importlib
 import logging
 import queue
 import threading
@@ -8,7 +9,6 @@ import time
 from datetime import date, datetime, timedelta
 from typing import Callable, List, Optional, TypeVar, cast
 
-import akshare as ak
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel
@@ -38,6 +38,19 @@ from models import (
 )
 
 T = TypeVar("T")
+
+
+def _akshare_module():
+    return importlib.import_module("akshare")
+
+
+class _LazyAkShare:
+    def __getattr__(self, name: str):
+        return getattr(_akshare_module(), name)
+
+
+ak = _LazyAkShare()
+
 
 BENCHMARKS: dict[MarketMode, tuple[str, str]] = {
     "us": ("SPY", "SPDR S&P 500 ETF Trust"),

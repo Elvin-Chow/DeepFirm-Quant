@@ -1,13 +1,13 @@
 """Smart multi-source data fetcher with automatic failover."""
 
 import logging
+import importlib
 import os
 import threading
 import time
 from datetime import date, datetime, time as datetime_time, timezone
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
-import akshare as ak
 import numpy as np
 import pandas as pd
 import requests
@@ -19,6 +19,18 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_valid
 from data_pipeline.exceptions import DataFetcherError
 
 logger = logging.getLogger(__name__)
+
+
+def _akshare_module():
+    return importlib.import_module("akshare")
+
+
+class _LazyAkShare:
+    def __getattr__(self, name: str):
+        return getattr(_akshare_module(), name)
+
+
+ak = _LazyAkShare()
 
 
 class FetchRequest(BaseModel):
@@ -110,10 +122,10 @@ class SmartFetcher:
                 self._result_cache_dir = None
                 self._session = requests.Session()
 
-        self._macro_registry: Dict[str, Callable[..., pd.DataFrame]] = {
-            "lpr": ak.macro_china_lpr,
-            "shrzgm": ak.macro_china_shrzgm,
-            "cpi": ak.macro_china_cpi,
+        self._macro_registry: Dict[str, str] = {
+            "lpr": "macro_china_lpr",
+            "shrzgm": "macro_china_shrzgm",
+            "cpi": "macro_china_cpi",
         }
 
     def _result_cache_path(
@@ -1205,14 +1217,15 @@ class SmartFetcher:
         end_date: date,
     ) -> FetchResponse:
         """Fetch China macroeconomic indicators via AKShare."""
-        fetch_fn = self._macro_registry.get(indicator)
-        if fetch_fn is None:
+        fetch_name = self._macro_registry.get(indicator)
+        if fetch_name is None:
             raise DataFetcherError(
                 message=f"unsupported macro indicator: {indicator}",
                 symbol=indicator,
                 source="china_macro",
             )
 
+        fetch_fn = getattr(_akshare_module(), fetch_name)
         df = fetch_fn()
 
         date_col = None
