@@ -11,6 +11,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 
 from data_pipeline import MarketAligner, SmartFetcher
+from models.market_validation import MarketMode
 from models.ml_diagnostics import MLModelDiagnostics, diagnostics_from_frame
 from models.request_validation import (
     normalize_tickers,
@@ -33,7 +34,7 @@ class MarketRegimeRequest(BaseModel):
     weights: List[float] = Field(default_factory=list)
     api_key: Optional[str] = Field(default=None, description="Tiingo API key for failover")
     allow_sandbox_data: bool = Field(default=False, description="Allow synthetic demo price fallback")
-    market: Literal["us", "hk", "mixed"] = Field(default="us", description="Market mode")
+    market: MarketMode = Field(default="us", description="Market mode")
     model_type: RegimeModelType = Field(default="kmeans", description="Regime clustering model")
 
     @field_validator("tickers")

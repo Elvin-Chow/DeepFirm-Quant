@@ -1,3 +1,5 @@
+export type MarketMode = "us" | "hk" | "cn" | "mixed";
+
 export interface ViewSpec {
   assets: string[];
   relative_assets?: string[];
@@ -33,7 +35,7 @@ export interface RiskEvaluationRequest {
   leverage?: number;
   api_key?: string;
   allow_sandbox_data?: boolean;
-  market?: "us" | "hk" | "mixed";
+  market?: MarketMode;
 }
 
 export interface RiskEvaluationResult {
@@ -62,7 +64,7 @@ export interface RiskAnomalyRequest {
   weights: number[];
   api_key?: string;
   allow_sandbox_data?: boolean;
-  market?: "us" | "hk" | "mixed";
+  market?: MarketMode;
 }
 
 export interface RiskAnomalyResult {
@@ -90,7 +92,7 @@ export interface RiskRegimeRequest {
   end_date: string;
   weights: number[];
   api_key?: string;
-  market?: "us" | "hk" | "mixed";
+  market?: MarketMode;
   model_type?: "kmeans" | "gaussian_mixture";
   allow_sandbox_data?: boolean;
 }
@@ -119,7 +121,7 @@ export interface RiskMLForecastRequest {
   confidence_level?: number;
   api_key?: string;
   allow_sandbox_data?: boolean;
-  market?: "us" | "hk" | "mixed";
+  market?: MarketMode;
 }
 
 export interface RiskMLForecastResult {
@@ -137,13 +139,54 @@ export interface RiskMLForecastResult {
   diagnostics?: MLModelDiagnostics | null;
 }
 
+export interface CrisisWarningDriver {
+  feature: string;
+  feature_value: number;
+  shap_value: number;
+  direction: "increase_risk" | "decrease_risk";
+}
+
+export interface CrisisWarningDiagnostics {
+  model_health: "ok" | "degraded" | "unavailable";
+  asof_date: string;
+  training_start: string;
+  training_end: string;
+  n_observations: number;
+  n_training_rows: number;
+  positive_events: number;
+  positive_rate: number;
+  validation_metrics: Record<string, number>;
+  validation_positive_events: number;
+  probability_calibrated: boolean;
+  shap_fallback_used: boolean;
+  feature_count: number;
+  warnings: string[];
+}
+
+export interface CrisisWarningResult {
+  crisis_probability: number;
+  warning_level: "Low" | "Medium" | "High" | "Extreme";
+  model_name: string;
+  model_version: string;
+  horizon: 1 | 5;
+  target_definition: string;
+  base_value: number;
+  top_risk_drivers: CrisisWarningDriver[];
+  risk_reducers: CrisisWarningDriver[];
+  explanation: string;
+  diagnostics: CrisisWarningDiagnostics;
+  source: string;
+  source_detail?: string;
+  data_warnings?: string[];
+}
+
 export interface AlphaAnalysisRequest {
   tickers: string[];
   start_date: string;
   end_date: string;
   api_key?: string;
   allow_sandbox_data?: boolean;
-  market?: "us" | "hk" | "mixed";
+  market?: MarketMode;
 }
 
 export interface FactorRegressionResult {
@@ -197,7 +240,7 @@ export interface PortfolioOptimizeRequest {
   allow_sandbox_data?: boolean;
   backtest_enabled?: boolean;
   test_ratio?: number;
-  market?: "us" | "hk" | "mixed";
+  market?: MarketMode;
 }
 
 export interface AllocationPolicyResult {
@@ -262,8 +305,11 @@ export interface OptimizationResult {
   allocation_policy?: AllocationPolicyResult | null;
   benchmark_symbol: string;
   benchmark_name: string;
+  benchmark_source: string;
+  benchmark_source_detail: string;
   risk_free_rate: number;
   risk_free_rate_source: string;
+  risk_free_rate_source_detail: string;
   methodology_warnings: string[];
 }
 
@@ -275,6 +321,8 @@ export interface AnalysisRunRequest extends PortfolioOptimizeRequest {
   ml_horizon?: 1 | 5;
   ml_confidence_level?: number;
   regime_model_type?: "kmeans" | "gaussian_mixture";
+  crisis_enabled?: boolean;
+  crisis_horizon?: 1 | 5;
 }
 
 export interface AnalysisRunResult {
@@ -289,4 +337,5 @@ export interface AnalysisRunResult {
   anomaly?: RiskAnomalyResult | null;
   regime?: RiskRegimeResult | null;
   ml_forecast?: RiskMLForecastResult | null;
+  crisis_warning?: CrisisWarningResult | null;
 }

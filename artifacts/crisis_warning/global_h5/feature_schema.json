@@ -1,0 +1,26 @@
+{
+  "created_at": "2026-05-09T11:00:55+00:00",
+  "dtype": "float64",
+  "feature_count": 14,
+  "feature_names": [
+    "portfolio_return_1d",
+    "portfolio_return_5d",
+    "rolling_volatility_5d",
+    "rolling_volatility_20d",
+    "rolling_volatility_60d",
+    "rolling_mean_return_5d",
+    "rolling_mean_return_20d",
+    "rolling_max_drawdown_20d",
+    "rolling_max_drawdown_60d",
+    "downside_volatility_20d",
+    "skewness_20d",
+    "kurtosis_20d",
+    "correlation_mean_20d",
+    "correlation_max_20d"
+  ],
+  "horizon": 5,
+  "missing_value_policy": "reject_non_finite",
+  "schema_version": "crisis-warning-features-v1",
+  "tail_quantile": 0.05,
+  "target_method": "dynamic_quantile"
+}

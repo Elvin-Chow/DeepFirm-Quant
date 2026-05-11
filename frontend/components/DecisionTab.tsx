@@ -963,6 +963,10 @@ export default function DecisionTab({ data, loading, lang, minWeight }: Decision
         source={data.source}
         sourceDetail={data.source_detail}
         warnings={data.data_warnings}
+        benchmarkSource={data.benchmark_source}
+        benchmarkSourceDetail={data.benchmark_source_detail}
+        riskFreeRateSource={data.risk_free_rate_source}
+        riskFreeRateSourceDetail={data.risk_free_rate_source_detail}
       />
     </div>
   );

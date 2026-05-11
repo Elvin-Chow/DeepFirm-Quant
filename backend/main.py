@@ -14,6 +14,9 @@ from backend.schemas import AlphaAnalysisRequest, AnalysisRunRequest, AnalysisRu
 from backend.services import PortfolioAnalysisService
 from data_pipeline import AlignmentError, DataFetcherError, SmartFetcher
 from models import (
+    CrisisWarningRequest,
+    CrisisWarningResult,
+    CrisisWarningUnavailableError,
     FactorRegressionResult,
     MarketRegimeDetector,
     MarketRegimeRequest,
@@ -37,18 +40,20 @@ aligner = analysis_service.aligner
 factor_analyzer = analysis_service.factor_analyzer
 bl_optimizer = analysis_service.optimizer
 allocation_policy_engine = analysis_service.allocation_policy_engine
+crisis_warning_service = analysis_service.crisis_warning_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application lifespan events."""
+    crisis_warning_service.load_artifacts()
     yield
 
 
 app = FastAPI(
     title="DeepFirm Quant",
     description="Industrial-grade quant risk and decision engine",
-    version="3.0.0",
+    version="3.5.0",
     lifespan=lifespan,
 )
 
@@ -169,10 +174,25 @@ async def forecast_ml_risk(payload: MLRiskForecastRequest) -> MLRiskForecastResu
     return result
 
 
+@app.post("/api/v1/risk/crisis-warning", response_model=CrisisWarningResult)
+async def crisis_warning(payload: CrisisWarningRequest) -> CrisisWarningResult:
+    """Estimate explainable tail-risk event probability from offline artifacts."""
+    try:
+        return crisis_warning_service.evaluate(payload)
+    except CrisisWarningUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (DataFetcherError, AlignmentError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.post("/api/v1/alpha/fama-french", response_model=FactorRegressionResult)
 async def fama_french_alpha(payload: AlphaAnalysisRequest) -> FactorRegressionResult:
     """Run Fama-French factor attribution on an equal-weighted portfolio."""
     try:
+        if payload.market == "cn":
+            raise ValueError("China A-share factor attribution is not supported yet.")
         fetcher = _make_fetcher(payload.api_key, payload.allow_sandbox_data)
         engine = RiskEngine(fetcher=fetcher, aligner=aligner)
         price_df = engine._fetch_prices(

@@ -22,7 +22,7 @@ export default function MetricCard({
     <div className="glass-card flex min-w-0 items-start gap-3 p-3 sm:items-center sm:gap-4 sm:p-4">
       {Icon && (
         <div
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full sm:h-10 sm:w-10 ${
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-df-border shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_10px_24px_-18px_rgba(0,0,0,0.32)] backdrop-blur-xl sm:h-10 sm:w-10 ${
             danger
               ? "bg-df-danger/10 text-df-danger"
               : accent

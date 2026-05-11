@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from models import (
     AllocationMode,
+    CrisisWarningResult,
     FactorRegressionResult,
     MarketRegimeResult,
     MLRiskForecastResult,
@@ -16,13 +17,12 @@ from models import (
     RiskEvaluationResult,
     ViewSpec,
 )
+from models.market_validation import MarketMode
 from models.request_validation import (
     normalize_tickers,
     validate_common_portfolio_contract,
     validate_view_assets,
 )
-
-MarketMode = Literal["us", "hk", "mixed"]
 
 
 class MarketRequestBase(BaseModel):
@@ -108,6 +108,8 @@ class AnalysisRunRequest(PortfolioOptimizeRequest):
     ml_horizon: Literal[1, 5] = Field(default=5)
     ml_confidence_level: float = Field(default=0.95, ge=0.90, le=0.99)
     regime_model_type: Literal["kmeans", "gaussian_mixture"] = Field(default="kmeans")
+    crisis_enabled: bool = Field(default=True)
+    crisis_horizon: Literal[1, 5] = Field(default=5)
 
 
 class AnalysisRunResult(BaseModel):
@@ -124,3 +126,4 @@ class AnalysisRunResult(BaseModel):
     anomaly: Optional[RiskAnomalyResult] = Field(default=None)
     regime: Optional[MarketRegimeResult] = Field(default=None)
     ml_forecast: Optional[MLRiskForecastResult] = Field(default=None)
+    crisis_warning: Optional[CrisisWarningResult] = Field(default=None)

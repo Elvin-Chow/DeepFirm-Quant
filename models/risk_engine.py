@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sklearn.covariance import LedoitWolf
 
 from data_pipeline import AlignmentError, DataFetcherError, MarketAligner, SmartFetcher
+from models.market_validation import MarketMode, is_cn_ticker, is_hk_ticker
 from models.request_validation import (
     normalize_tickers,
     validate_common_portfolio_contract,
@@ -28,7 +29,7 @@ class RiskEvaluationRequest(BaseModel):
     mc_paths: int = Field(default=10_000, ge=1_000, le=50_000, description="Number of Monte Carlo simulation paths")
     capital: float = Field(default=1_000_000, gt=0, description="Total capital in base currency")
     leverage: float = Field(default=1.0, gt=0, description="Overall leverage multiplier")
-    market: Literal["us", "hk", "mixed"] = Field(default="us", description="Market mode: us, hk, or mixed")
+    market: MarketMode = Field(default="us", description="Market mode")
 
     @field_validator("tickers")
     @classmethod
@@ -72,6 +73,10 @@ class RiskEvaluationResult(BaseModel):
 
 class RiskEngine:
     """Compute log returns, historical ES, and Monte Carlo ES."""
+
+    CHINA_MIN_PRICE_OBSERVATIONS: int = 60
+    CHINA_MIN_BUSINESS_DAY_COVERAGE: float = 0.60
+    CHINA_FLAT_PRICE_RUN_WARNING_DAYS: int = 10
 
     def __init__(
         self,
@@ -504,11 +509,147 @@ class RiskEngine:
         }
 
     @staticmethod
-    def _resolve_market(ticker: str) -> str:
+    def _is_cn_ticker(ticker: str) -> bool:
+        """Return whether a ticker uses the supported A-share format."""
+        return is_cn_ticker(str(ticker).strip())
+
+    @staticmethod
+    def _resolve_market(ticker: str) -> Literal["NYSE", "HKEX", "SSE"]:
         """Map ticker symbols to their primary exchange."""
-        if ticker.upper().endswith(".HK"):
+        clean_ticker = str(ticker).strip()
+        if is_hk_ticker(clean_ticker):
             return "HKEX"
+        if is_cn_ticker(clean_ticker):
+            return "SSE"
         return "NYSE"
+
+    @staticmethod
+    def _append_fetcher_warning(fetcher: object, message: str) -> None:
+        """Attach one data warning to a fetcher-like object."""
+        append_warning = getattr(fetcher, "_append_warning", None)
+        if callable(append_warning):
+            append_warning(message)
+            return
+
+        warnings = getattr(fetcher, "data_warnings", None)
+        if isinstance(warnings, list) and message not in warnings:
+            warnings.append(message)
+
+    @staticmethod
+    def _max_flat_price_run(close_values: np.ndarray) -> int:
+        """Return the longest consecutive run of unchanged close prices."""
+        if close_values.size == 0:
+            return 0
+
+        longest = 1
+        current = 1
+        for idx in range(1, close_values.size):
+            if np.isclose(close_values[idx], close_values[idx - 1], rtol=0.0, atol=1e-12):
+                current += 1
+            else:
+                current = 1
+            longest = max(longest, current)
+        return longest
+
+    @classmethod
+    def _china_price_quality_warnings(
+        cls,
+        raw_df: pd.DataFrame,
+        normalized_df: pd.DataFrame,
+        ticker: str,
+        start_date: date,
+        end_date: date,
+    ) -> List[str]:
+        """Build non-fatal quality warnings for standalone A-share prices."""
+        warnings: List[str] = []
+        row_count = len(normalized_df)
+
+        if row_count < cls.CHINA_MIN_PRICE_OBSERVATIONS:
+            warnings.append(
+                f"{ticker}: China A-share price sample is short "
+                f"({row_count} observations); risk estimates may be unstable."
+            )
+
+        date_col = "日期" if "日期" in raw_df.columns else "Date" if "Date" in raw_df.columns else None
+        if date_col is not None:
+            raw_dates = pd.to_datetime(raw_df[date_col], errors="coerce")
+            valid_raw_dates = raw_dates.dropna().dt.normalize()
+            duplicate_rows = int(valid_raw_dates.duplicated(keep=False).sum())
+            if duplicate_rows > 0:
+                warnings.append(
+                    f"{ticker}: China A-share price data contained {duplicate_rows} "
+                    "duplicate date rows; the last close per date was used."
+                )
+
+        expected_days = pd.bdate_range(start_date, end_date)
+        if len(expected_days) >= 10:
+            observed_days = pd.DatetimeIndex(normalized_df["Date"])
+            covered_days = observed_days.intersection(expected_days)
+            coverage = len(covered_days) / len(expected_days)
+            if coverage < cls.CHINA_MIN_BUSINESS_DAY_COVERAGE:
+                warnings.append(
+                    f"{ticker}: China A-share price coverage is low "
+                    f"({coverage:.0%} of requested business days); results may be affected "
+                    "by missing prices or trading suspensions."
+                )
+
+        close_values = normalized_df["Close"].to_numpy(dtype=float)
+        flat_run = cls._max_flat_price_run(close_values)
+        if flat_run >= cls.CHINA_FLAT_PRICE_RUN_WARNING_DAYS:
+            warnings.append(
+                f"{ticker}: China A-share close price was unchanged for {flat_run} "
+                "consecutive observations; check for suspension or stale data."
+            )
+
+        return warnings
+
+    @staticmethod
+    def _normalize_china_price_frame(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+        """Normalize AKShare A-share prices into Date and Close columns."""
+        if df.empty:
+            raise DataFetcherError(
+                message=f"empty dataframe returned from AKShare for {ticker}",
+                symbol=ticker,
+                source="china_equity",
+            )
+        if "日期" in df.columns:
+            date_col = "日期"
+        elif "Date" in df.columns:
+            date_col = "Date"
+        else:
+            raise DataFetcherError(
+                message=f"missing price date column for {ticker}",
+                symbol=ticker,
+                source="china_equity",
+            )
+
+        if "收盘" in df.columns:
+            close_col = "收盘"
+        elif "Close" in df.columns:
+            close_col = "Close"
+        else:
+            raise DataFetcherError(
+                message=f"missing price close column for {ticker}",
+                symbol=ticker,
+                source="china_equity",
+            )
+
+        dates = pd.to_datetime(df[date_col], errors="coerce")
+        close = pd.to_numeric(df[close_col], errors="coerce")
+        if dates.isna().any():
+            raise ValueError(f"unparseable price dates for {ticker}")
+        close_values = close.to_numpy(dtype=float)
+        if not np.isfinite(close_values).all():
+            raise ValueError(f"non-finite close prices for {ticker}")
+        if (close_values <= 0.0).any():
+            raise ValueError(f"non-positive close prices for {ticker}")
+
+        normalized = pd.DataFrame({"Date": dates.dt.tz_localize(None).dt.normalize(), "Close": close_values})
+        normalized = normalized.sort_values("Date")
+        normalized = normalized.drop_duplicates(subset=["Date"], keep="last")
+        if len(normalized) < 2:
+            raise ValueError(f"at least two valid price rows are required for {ticker}")
+        return normalized.reset_index(drop=True)
 
     def _fetch_prices(
         self,
@@ -520,6 +661,43 @@ class RiskEngine:
         """Fetch and align close prices for a list of tickers."""
         series_list: List[pd.Series] = []
         markets: List[str] = []
+
+        if market_mode == "cn":
+            for idx, ticker in enumerate(tickers):
+                if idx > 0:
+                    import time
+                    time.sleep(0.5)
+
+                clean_ticker = str(ticker).strip()
+                if not self._is_cn_ticker(clean_ticker):
+                    raise ValueError(
+                        f"CN market mode only accepts 6-digit A-share tickers: {clean_ticker}"
+                    )
+                response = self.fetcher.fetch_china_equity(
+                    clean_ticker,
+                    start_date,
+                    end_date,
+                )
+                df = self._normalize_china_price_frame(response.data, clean_ticker)
+                for warning in self._china_price_quality_warnings(
+                    response.data,
+                    df,
+                    clean_ticker,
+                    start_date,
+                    end_date,
+                ):
+                    self._append_fetcher_warning(self.fetcher, warning)
+                prices = pd.Series(
+                    df["Close"].values,
+                    index=pd.to_datetime(df["Date"].values),
+                    name=clean_ticker,
+                )
+                series_list.append(prices)
+                markets.append("SSE")
+
+            aligned = self.aligner.align_multiple(series_list, markets)
+            aligned.columns = tickers
+            return aligned
 
         # Try batch download first to minimize HTTP requests and avoid rate limits
         if len(tickers) > 1:
@@ -639,6 +817,8 @@ class RiskEngine:
             sample_paths=sample_paths,
             correlation_matrix=corr_matrix.tolist(),
             source=self.fetcher.last_source,
+            source_detail=self.fetcher.last_source_detail,
+            data_warnings=list(self.fetcher.data_warnings),
             absolute_loss_historical=abs_loss_hist,
             absolute_loss_monte_carlo=abs_loss_mc,
             cumulative_returns=perf["cumulative_returns"],

@@ -5,6 +5,7 @@ export const TIME_OPTIONS = ["3M", "6M", "1Y", "2Y", "5Y", "ALL"] as const;
 export const MARKET_OPTIONS = {
   "US Market": "us",
   "HK Market": "hk",
+  "China A-Share Market": "cn",
   "Mixed (US+HK)": "mixed",
 } as const;
 

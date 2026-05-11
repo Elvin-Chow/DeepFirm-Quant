@@ -62,9 +62,11 @@ class SmartFetcher:
     _yf_last_call_time = 0.0
     _yf_cooldown_until = 0.0
     _yahoo_chart_cooldown_until = 0.0
+    _china_akshare_cooldown_until = 0.0
     _yf_min_interval_seconds = 0.6
     _yf_cooldown_seconds = 15.0
     _yahoo_chart_cooldown_seconds = 15.0
+    _china_akshare_cooldown_seconds = 90.0
 
     def __init__(
         self,
@@ -143,6 +145,8 @@ class SmartFetcher:
             return df.copy()
 
         normalized = df.copy()
+        if "Date" not in normalized.columns and "日期" in normalized.columns:
+            normalized = normalized.rename(columns={"日期": "Date"})
         if "Date" not in normalized.columns:
             normalized = normalized.reset_index()
             if "Date" not in normalized.columns:
@@ -151,6 +155,8 @@ class SmartFetcher:
         normalized["Date"] = pd.to_datetime(normalized["Date"], errors="coerce")
         normalized["Date"] = normalized["Date"].dt.tz_localize(None).dt.normalize()
 
+        if "Close" not in normalized.columns and "收盘" in normalized.columns:
+            normalized["Close"] = normalized["收盘"]
         if "Close" not in normalized.columns and "Adj Close" in normalized.columns:
             normalized["Close"] = normalized["Adj Close"]
         if "Close" not in normalized.columns:
@@ -161,6 +167,24 @@ class SmartFetcher:
         normalized = normalized.sort_values("Date")
         normalized = normalized.drop_duplicates(subset=["Date"], keep="last")
         return normalized.reset_index(drop=True)
+
+    @staticmethod
+    def _cache_storage_frame(df: pd.DataFrame) -> pd.DataFrame:
+        """Return the canonical columns stored in price caches."""
+        normalized = SmartFetcher._normalize_price_frame(df)
+        if normalized.empty:
+            return normalized
+        return normalized[["Date", "Close"]].copy()
+
+    @staticmethod
+    def _provider_metadata_frame(df: pd.DataFrame) -> pd.DataFrame:
+        """Return date-aligned provider metadata from a cached frame."""
+        normalized = SmartFetcher._normalize_price_frame(df)
+        if normalized.empty or "__provider" not in normalized.columns:
+            return pd.DataFrame(columns=["Date", "__provider"])
+        provider_frame = normalized[["Date", "__provider"]].copy()
+        provider_frame["__provider"] = provider_frame["__provider"].fillna("unknown").astype(str)
+        return provider_frame.drop_duplicates(subset=["Date"], keep="last")
 
     @staticmethod
     def _expected_cache_bounds(start_date: date, end_date: date) -> Tuple[pd.Timestamp, pd.Timestamp]:
@@ -197,8 +221,9 @@ class SmartFetcher:
         expected_start, expected_end = self._expected_cache_bounds(start_date, end_date)
         first_date = pd.Timestamp(filtered["Date"].min())
         last_date = pd.Timestamp(filtered["Date"].max())
-        covers_start = first_date <= expected_start + pd.Timedelta(days=7)
-        covers_end = last_date >= expected_end - pd.Timedelta(days=7)
+        complete_tolerance = pd.Timedelta(days=3)
+        covers_start = first_date <= expected_start + complete_tolerance
+        covers_end = last_date >= expected_end - complete_tolerance
         has_full_coverage = covers_start and covers_end
         if has_full_coverage:
             return filtered.reset_index(drop=True), False
@@ -251,7 +276,11 @@ class SmartFetcher:
                         provider = providers[0]
                     elif len(providers) > 1:
                         provider = "mixed"
-                result_df = result_df.drop(columns=["__provider"], errors="ignore")
+                provider_columns = [
+                    column for column in result_df.columns
+                    if str(column).startswith("__provider")
+                ]
+                result_df = result_df.drop(columns=provider_columns, errors="ignore")
                 return result_df, bool(is_partial), provider
             except Exception as exc:
                 logger.warning("price cache read skipped for %s: %s", symbol, exc)
@@ -283,7 +312,7 @@ class SmartFetcher:
         if not self.cache_enabled or self._result_cache_dir is None:
             return
         try:
-            normalized = self._normalize_price_frame(df)
+            normalized = self._cache_storage_frame(df)
             if normalized.empty:
                 return
             normalized["__provider"] = provider
@@ -292,14 +321,9 @@ class SmartFetcher:
             if os.path.exists(symbol_path):
                 try:
                     existing_raw = pd.read_parquet(symbol_path)
-                    existing = self._normalize_price_frame(existing_raw)
-                    if "__provider" in existing_raw.columns:
-                        provider_map = (
-                            existing_raw[["Date", "__provider"]]
-                            .assign(Date=lambda frame: pd.to_datetime(frame["Date"], errors="coerce").dt.tz_localize(None).dt.normalize())
-                            .dropna(subset=["Date"])
-                            .drop_duplicates(subset=["Date"], keep="last")
-                        )
+                    existing = self._cache_storage_frame(existing_raw)
+                    provider_map = self._provider_metadata_frame(existing_raw)
+                    if not provider_map.empty:
                         existing = existing.merge(provider_map, on="Date", how="left")
                     if "__provider" not in existing.columns:
                         existing["__provider"] = "unknown"
@@ -325,10 +349,48 @@ class SmartFetcher:
         if message not in self.data_warnings:
             self.data_warnings.append(message)
 
+    @classmethod
+    def is_china_akshare_cooling_down(cls) -> bool:
+        """Return whether recent AKShare A-share failures should be bypassed."""
+        return time.time() < cls._china_akshare_cooldown_until
+
+    @classmethod
+    def _register_china_akshare_failure(cls) -> None:
+        """Bypass AKShare A-share calls briefly after provider failures."""
+        cls._china_akshare_cooldown_until = (
+            time.time() + cls._china_akshare_cooldown_seconds
+        )
+
+    @staticmethod
+    def _akshare_timeout_seconds() -> float:
+        """Return the AKShare request timeout used for A-share fetches."""
+        try:
+            return max(1.0, float(os.getenv("DFQ_AKSHARE_TIMEOUT_SECONDS", "3")))
+        except ValueError:
+            return 3.0
+
+    @staticmethod
+    def _akshare_attempts() -> int:
+        """Return the configured AKShare attempt count for A-share fetches."""
+        try:
+            return max(1, int(os.getenv("DFQ_AKSHARE_ATTEMPTS", "1")))
+        except ValueError:
+            return 1
+
     @staticmethod
     def _market_for_ticker(ticker: str) -> Literal["us_equity", "hk_equity"]:
         """Resolve the fetcher market source for a listed ticker."""
         return "hk_equity" if ticker.upper().endswith(".HK") else "us_equity"
+
+    @staticmethod
+    def _normalize_cn_yahoo_symbol(symbol: str) -> str:
+        """Normalize an A-share symbol for Yahoo Finance fallback."""
+        clean_symbol = str(symbol).strip()
+        if clean_symbol.startswith(("0", "2", "3")):
+            return f"{clean_symbol}.SZ"
+        if clean_symbol.startswith(("4", "8")):
+            return f"{clean_symbol}.BJ"
+        return f"{clean_symbol}.SS"
 
     @staticmethod
     def _cache_detail(stale: bool, provider: str) -> Tuple[str, str]:
@@ -463,7 +525,6 @@ class SmartFetcher:
     ) -> pd.DataFrame:
         """Fetch daily prices from Yahoo chart API without the yfinance cookie flow."""
         yf_symbol = self._normalize_yf_symbol(symbol)
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_symbol}"
         params = {
             "period1": self._unix_timestamp(start_date),
             "period2": self._unix_timestamp(end_date, end_of_day=True),
@@ -472,54 +533,66 @@ class SmartFetcher:
             "includeAdjustedClose": "true",
         }
         headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-            )
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json,text/plain,*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Connection": "close",
         }
-        response = self._session.get(url, params=params, headers=headers, timeout=20)
-        response.raise_for_status()
-        payload = response.json()
-        chart = payload.get("chart", {})
-        error = chart.get("error")
-        if error:
-            raise DataFetcherError(
-                message=str(error.get("description") or error),
-                symbol=symbol,
-                source="yahoo_chart",
-            )
-        results = chart.get("result") or []
-        if not results:
-            raise DataFetcherError(
-                message="empty Yahoo chart response",
-                symbol=symbol,
-                source="yahoo_chart",
-            )
-        result = results[0]
-        timestamps = result.get("timestamp") or []
-        quote = (result.get("indicators", {}).get("quote") or [{}])[0]
-        adjclose = (result.get("indicators", {}).get("adjclose") or [{}])[0].get("adjclose")
-        closes = adjclose or quote.get("close") or []
-        if not timestamps or not closes:
-            raise DataFetcherError(
-                message="Yahoo chart response missing close prices",
-                symbol=symbol,
-                source="yahoo_chart",
-            )
-        df = pd.DataFrame(
-            {
-                "Date": pd.to_datetime(timestamps, unit="s", utc=True).tz_convert(None).normalize(),
-                "Close": closes,
-            }
+        provider_errors: List[str] = []
+        for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
+            url = f"https://{host}/v8/finance/chart/{yf_symbol}"
+            try:
+                response = self._session.get(url, params=params, headers=headers, timeout=20)
+                response.raise_for_status()
+                payload = response.json()
+                chart = payload.get("chart", {})
+                error = chart.get("error")
+                if error:
+                    raise DataFetcherError(
+                        message=str(error.get("description") or error),
+                        symbol=symbol,
+                        source="yahoo_chart",
+                    )
+                results = chart.get("result") or []
+                if not results:
+                    raise DataFetcherError(
+                        message="empty Yahoo chart response",
+                        symbol=symbol,
+                        source="yahoo_chart",
+                    )
+                result = results[0]
+                timestamps = result.get("timestamp") or []
+                quote = (result.get("indicators", {}).get("quote") or [{}])[0]
+                adjclose = (result.get("indicators", {}).get("adjclose") or [{}])[0].get("adjclose")
+                closes = adjclose or quote.get("close") or []
+                if not timestamps or not closes:
+                    raise DataFetcherError(
+                        message="Yahoo chart response missing close prices",
+                        symbol=symbol,
+                        source="yahoo_chart",
+                    )
+                df = pd.DataFrame(
+                    {
+                        "Date": pd.to_datetime(timestamps, unit="s", utc=True).tz_convert(None).normalize(),
+                        "Close": closes,
+                    }
+                )
+                df = self._normalize_price_frame(df)
+                if df.empty:
+                    raise DataFetcherError(
+                        message="Yahoo chart response contained no finite close prices",
+                        symbol=symbol,
+                        source="yahoo_chart",
+                    )
+                return df
+            except Exception as exc:
+                provider_errors.append(f"{host}: {exc}")
+
+        raise DataFetcherError(
+            message="; ".join(provider_errors) or "Yahoo chart response failed",
+            symbol=symbol,
+            source="yahoo_chart",
         )
-        df = self._normalize_price_frame(df)
-        if df.empty:
-            raise DataFetcherError(
-                message="Yahoo chart response contained no finite close prices",
-                symbol=symbol,
-                source="yahoo_chart",
-            )
-        return df
 
     def _fetch_yf(
         self,
@@ -978,31 +1051,151 @@ class SmartFetcher:
         end_date: date,
     ) -> FetchResponse:
         """Fetch A-share historical prices via AKShare."""
-        start_str = start_date.strftime("%Y%m%d")
-        end_str = end_date.strftime("%Y%m%d")
-
-        df = ak.stock_zh_a_hist(
-            symbol=symbol,
-            period="daily",
-            start_date=start_str,
-            end_date=end_str,
-            adjust="qfq",
-        )
-        if df.empty:
-            raise DataFetcherError(
-                message="empty dataframe returned from AKShare",
+        cached = self._read_price_cache("china_equity", symbol, start_date, end_date)
+        if cached is not None:
+            df, stale, provider = cached
+            cache_provider = provider if provider and provider != "unknown" else "akshare"
+            source, detail = self._cache_detail(stale, cache_provider)
+            self._mark_source(source, detail)
+            if stale:
+                self._append_warning(
+                    f"{symbol}: using cached prices because live data is temporarily unavailable"
+                )
+            return FetchResponse(
                 symbol=symbol,
                 source="china_equity",
+                records=len(df),
+                start_date=start_date,
+                end_date=end_date,
+                data=df,
             )
 
-        self.last_source = "akshare"
-        return FetchResponse(
+        start_str = start_date.strftime("%Y%m%d")
+        end_str = end_date.strftime("%Y%m%d")
+        provider_errors: List[str] = []
+
+        if self.is_china_akshare_cooling_down():
+            provider_errors.append("akshare: skipped during provider cooldown")
+        else:
+            for attempt in range(self._akshare_attempts()):
+                try:
+                    df = ak.stock_zh_a_hist(
+                        symbol=symbol,
+                        period="daily",
+                        start_date=start_str,
+                        end_date=end_str,
+                        adjust="qfq",
+                        timeout=self._akshare_timeout_seconds(),
+                    )
+                    if df.empty:
+                        raise DataFetcherError(
+                            message="empty dataframe returned from AKShare",
+                            symbol=symbol,
+                            source="china_equity",
+                        )
+                    self._write_result_cache(
+                        df,
+                        "china_equity",
+                        symbol,
+                        start_date,
+                        end_date,
+                        provider="akshare",
+                    )
+                    self._mark_source("akshare", "AKShare A-share daily qfq")
+                    return FetchResponse(
+                        symbol=symbol,
+                        source="china_equity",
+                        records=len(df),
+                        start_date=start_date,
+                        end_date=end_date,
+                        data=df,
+                    )
+                except Exception as exc:
+                    self._register_china_akshare_failure()
+                    provider_errors.append(self._format_error("akshare", exc))
+                    logger.warning("AKShare A-share fetch failed for %s: %s", symbol, exc)
+                    if attempt < self._akshare_attempts() - 1:
+                        time.sleep(0.5)
+
+        try:
+            yahoo_symbol = self._normalize_cn_yahoo_symbol(symbol)
+            df = self._fetch_yahoo_chart(yahoo_symbol, start_date, end_date)
+            if df.empty or "Close" not in df.columns:
+                raise DataFetcherError(
+                    message="Yahoo Finance fallback returned no usable close prices",
+                    symbol=symbol,
+                    source="yahoo_chart",
+                )
+            self._write_result_cache(
+                df,
+                "china_equity",
+                symbol,
+                start_date,
+                end_date,
+                provider="yahoo_chart_cn",
+            )
+            self._mark_source("yahoo_chart", "Yahoo Finance chart API (A-share fallback)")
+            self._append_warning(
+                f"{symbol}: AKShare A-share data was unavailable; using Yahoo Finance fallback"
+            )
+            return FetchResponse(
+                symbol=symbol,
+                source="china_equity",
+                records=len(df),
+                start_date=start_date,
+                end_date=end_date,
+                data=df,
+            )
+        except Exception as exc:
+            provider_errors.append(self._format_error("yahoo_chart", exc))
+            logger.warning("Yahoo A-share fallback failed for %s: %s", symbol, exc)
+
+        stale_cached = self._read_price_cache(
+            "china_equity",
+            symbol,
+            start_date,
+            end_date,
+            allow_stale=True,
+            allow_partial=True,
+        )
+        if stale_cached is not None:
+            df, stale, provider = stale_cached
+            cache_provider = provider if provider and provider != "unknown" else "akshare"
+            source, detail = self._cache_detail(stale, cache_provider)
+            self._mark_source(source, detail)
+            self._append_warning(
+                f"{symbol}: using cached prices because live data is temporarily unavailable"
+            )
+            return FetchResponse(
+                symbol=symbol,
+                source="china_equity",
+                records=len(df),
+                start_date=start_date,
+                end_date=end_date,
+                data=df,
+            )
+
+        if self.allow_sandbox_data:
+            df = self._fetch_sandbox(symbol, start_date, end_date)
+            self._mark_source("sandbox", "sandbox demo")
+            self._append_warning(f"{symbol}: using sandbox demo prices")
+            return FetchResponse(
+                symbol=symbol,
+                source="china_equity",
+                records=len(df),
+                start_date=start_date,
+                end_date=end_date,
+                data=df,
+            )
+
+        details = "; ".join(provider_errors) if provider_errors else "no live provider returned data"
+        raise DataFetcherError(
+            message=(
+                f"Unable to fetch real A-share price data for {symbol}. {details}. "
+                "Enable Demo Fallback only for sandbox demonstrations."
+            ),
             symbol=symbol,
             source="china_equity",
-            records=len(df),
-            start_date=start_date,
-            end_date=end_date,
-            data=df,
         )
 
     def fetch_china_macro(

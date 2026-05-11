@@ -17,6 +17,8 @@ export function localizeProvider(value: string | undefined, lang: Lang): string 
     kenneth_french: "Kenneth French Data Library",
     synthetic: byLang(lang, "Synthetic factor proxy", "合成因子代理", "合成因子代理"),
     sandbox: byLang(lang, "Demo prices", "演示价格", "演示價格"),
+    fallback: byLang(lang, "Fallback", "兜底值", "兜底值"),
+    request: byLang(lang, "Request override", "请求指定值", "請求指定值"),
     unknown: byLang(lang, "Unknown", "未知", "未知"),
   };
 
@@ -33,6 +35,21 @@ export function localizeProvider(value: string | undefined, lang: Lang): string 
   if (normalized === "stale_cache") return byLang(lang, "Stale cache", "缓存兜底", "快取兜底");
   if (normalized === "cache") return byLang(lang, "Cache", "缓存", "快取");
   if (normalized === "mixed") return byLang(lang, "Mixed sources", "混合来源", "混合來源");
+  if (normalized === "china a-share policy fallback (2.00% annualized)") {
+    return byLang(lang, "China A-share fallback · 2.00% annualized", "A股兜底值 · 2.00% 年化", "A股兜底值 · 2.00% 年化");
+  }
+  if (normalized === "deterministic fallback (2.00% annualized)") {
+    return byLang(lang, "Fallback · 2.00% annualized", "兜底值 · 2.00% 年化", "兜底值 · 2.00% 年化");
+  }
+  if (normalized === "us 13-week treasury bill proxy") {
+    return byLang(lang, "US 13-week Treasury bill proxy", "美国 13 周国债代理", "美國 13 週國債代理");
+  }
+  if (normalized === "akshare csi 300 index daily") {
+    return byLang(lang, "AKShare · CSI 300 daily", "AKShare · 沪深 300 日线", "AKShare · 滬深 300 日線");
+  }
+  if (normalized === "yahoo finance chart api (csi 300 fallback)") {
+    return byLang(lang, "Yahoo Finance · CSI 300 fallback", "Yahoo Finance · 沪深 300 兜底", "Yahoo Finance · 滬深 300 兜底");
+  }
   return providerMap[normalized] || raw;
 }
 
@@ -45,6 +62,54 @@ export function localizeWarning(message: string, lang: Lang): string {
       `${cached[1]} used cached prices; this run did not refresh live quotes.`,
       `${cached[1]} 本次未刷新到最新价格，已使用缓存价格。`,
       `${cached[1]} 本次未刷新到最新價格，已使用快取價格。`
+    );
+  }
+
+  const shortChinaSample = trimmed.match(
+    /^(.+): China A-share price sample is short \((\d+) observations\); risk estimates may be unstable\.$/i
+  );
+  if (shortChinaSample) {
+    return byLang(
+      lang,
+      `${shortChinaSample[1]} has only ${shortChinaSample[2]} A-share price observations; risk estimates may be unstable.`,
+      `${shortChinaSample[1]} 只有 ${shortChinaSample[2]} 条 A股价格样本，风险估计可能不稳定。`,
+      `${shortChinaSample[1]} 只有 ${shortChinaSample[2]} 條 A股價格樣本，風險估計可能不穩定。`
+    );
+  }
+
+  const duplicateChinaDates = trimmed.match(
+    /^(.+): China A-share price data contained (\d+) duplicate date rows; the last close per date was used\.$/i
+  );
+  if (duplicateChinaDates) {
+    return byLang(
+      lang,
+      `${duplicateChinaDates[1]} had ${duplicateChinaDates[2]} duplicate A-share date rows; the last close per date was used.`,
+      `${duplicateChinaDates[1]} 有 ${duplicateChinaDates[2]} 条重复日期记录，已使用每个日期的最后收盘价。`,
+      `${duplicateChinaDates[1]} 有 ${duplicateChinaDates[2]} 條重複日期記錄，已使用每個日期的最後收盤價。`
+    );
+  }
+
+  const lowChinaCoverage = trimmed.match(
+    /^(.+): China A-share price coverage is low \((.+) of requested business days\); results may be affected by missing prices or trading suspensions\.$/i
+  );
+  if (lowChinaCoverage) {
+    return byLang(
+      lang,
+      `${lowChinaCoverage[1]} covers only ${lowChinaCoverage[2]} of requested business days; missing prices or suspensions may affect results.`,
+      `${lowChinaCoverage[1]} 仅覆盖请求工作日的 ${lowChinaCoverage[2]}，缺失价格或停牌可能影响结果。`,
+      `${lowChinaCoverage[1]} 僅覆蓋請求工作日的 ${lowChinaCoverage[2]}，缺失價格或停牌可能影響結果。`
+    );
+  }
+
+  const flatChinaPrices = trimmed.match(
+    /^(.+): China A-share close price was unchanged for (\d+) consecutive observations; check for suspension or stale data\.$/i
+  );
+  if (flatChinaPrices) {
+    return byLang(
+      lang,
+      `${flatChinaPrices[1]} was unchanged for ${flatChinaPrices[2]} observations; check for suspension or stale prices.`,
+      `${flatChinaPrices[1]} 连续 ${flatChinaPrices[2]} 条收盘价不变，请检查是否停牌或价格陈旧。`,
+      `${flatChinaPrices[1]} 連續 ${flatChinaPrices[2]} 條收盤價不變，請檢查是否停牌或價格陳舊。`
     );
   }
 
@@ -74,6 +139,21 @@ export function localizeWarning(message: string, lang: Lang): string {
       "样本外表现落后基准，本次建议偏防守。",
       "樣本外表現落後基準，本次建議偏防守。",
     ],
+    "China A-share risk-free rate is unavailable; defaulted to 2.00% annualized.": [
+      "China A-share risk-free rate was unavailable; 2.00% annualized fallback was used.",
+      "A股无风险利率暂不可用，已使用 2.00% 年化兜底值。",
+      "A股無風險利率暫不可用，已使用 2.00% 年化兜底值。",
+    ],
+    "China A-share OOS benchmark uses CSI 300 Index (000300).": [
+      "China A-share OOS benchmark uses CSI 300 Index (000300).",
+      "A股样本外基准使用沪深 300 指数（000300）。",
+      "A股樣本外基準使用滬深 300 指數（000300）。",
+    ],
+    "China A-share market-cap prior is unavailable; optimizer used inverse-volatility equilibrium.": [
+      "China A-share market-cap prior was unavailable; inverse-volatility equilibrium was used.",
+      "A股市值先验暂不可用，优化器已使用逆波动率均衡。",
+      "A股市值先驗暫不可用，優化器已使用逆波動率均衡。",
+    ],
   };
   const mapped = mappings[trimmed];
   if (mapped) return byLang(lang, mapped[0], mapped[1], mapped[2]);
@@ -94,6 +174,7 @@ export function localizeModelHealth(value: string | undefined, lang: Lang): stri
   if (normalized === "ok") return byLang(lang, "Healthy", "正常", "正常");
   if (normalized === "degraded") return byLang(lang, "Watch", "需关注", "需關注");
   if (normalized === "fallback") return byLang(lang, "Fallback", "已降级", "已降級");
+  if (normalized === "unavailable") return byLang(lang, "Unavailable", "不可用", "不可用");
   return byLang(lang, "Unknown", "未知", "未知");
 }
 

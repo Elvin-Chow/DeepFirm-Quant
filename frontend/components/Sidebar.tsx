@@ -6,6 +6,7 @@ import {
   CalendarDays,
   SlidersHorizontal,
   DollarSign,
+  JapaneseYen,
   Route,
   Maximize2,
   Eye,
@@ -24,6 +25,7 @@ import {
 } from "lucide-react";
 import { TIME_OPTIONS } from "@/lib/constants";
 import { t, Lang } from "@/lib/i18n";
+import type { CurrencySymbol } from "@/lib/currency";
 import { Preset } from "@/hooks/usePresets";
 import { useTheme } from "@/hooks/useTheme";
 import GradientButton from "@/components/ui/GradientButton";
@@ -81,6 +83,7 @@ interface SidebarProps {
   onDismissError?: () => void;
   lang: Lang;
   setLang: (v: Lang) => void;
+  currencySymbol: CurrencySymbol;
   presets: Preset[];
   onSavePreset: (name: string) => void;
   onLoadPreset: (preset: Preset) => void;
@@ -199,6 +202,7 @@ export default function Sidebar(props: SidebarProps) {
     onDismissError,
     lang,
     setLang,
+    currencySymbol,
     presets,
     onSavePreset,
     onLoadPreset,
@@ -218,6 +222,8 @@ export default function Sidebar(props: SidebarProps) {
     .map((t) => t.trim())
     .filter(Boolean);
   const selectedPreset = presets.find((preset) => preset.name === selectedPresetName);
+  const CapitalIcon = currencySymbol === "¥" ? JapaneseYen : DollarSign;
+  const capitalInputPadding = currencySymbol.length > 1 ? "pl-14" : "pl-8";
 
   useEffect(() => {
     setMounted(true);
@@ -475,18 +481,23 @@ export default function Sidebar(props: SidebarProps) {
           </AccordionSection>
         )}
 
-        <AccordionSection icon={DollarSign} title={t(lang, "capitalLeverage")} helpText={t(lang, "capitalLeverageHelp")}>
+        <AccordionSection icon={CapitalIcon} title={t(lang, "capitalLeverage")} helpText={t(lang, "capitalLeverageHelp")}>
           <div className="space-y-3">
             <div>
               <label className="text-xs text-df-text-secondary block mb-1.5">
-                {t(lang, "totalCapital")}
+                {t(lang, "totalCapital")} ({currencySymbol})
               </label>
-              <input
-                type="number"
-                className="min-h-11 w-full df-control rounded-2xl px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-df-accent/50"
-                value={capital}
-                onChange={(e) => setCapital(Number(e.target.value))}
-              />
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-df-text-secondary">
+                  {currencySymbol}
+                </span>
+                <input
+                  type="number"
+                  className={`min-h-11 w-full df-control rounded-2xl py-2.5 pr-3 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-df-accent/50 ${capitalInputPadding}`}
+                  value={capital}
+                  onChange={(e) => setCapital(Number(e.target.value))}
+                />
+              </div>
             </div>
             <div>
               <label className="text-xs text-df-text-secondary block mb-1.5">

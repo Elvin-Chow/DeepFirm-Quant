@@ -60,9 +60,20 @@ export default function AlphaTab({
 
   if (loading) return <Loading />;
   if (!data) {
-    const unavailableMessage = message || t(lang, "alphaUnavailableMessage");
+    const unavailableMessage =
+      market === "cn" && status === "unavailable"
+        ? t(lang, "chinaAlphaUnavailable")
+        : message || t(lang, "alphaUnavailableMessage");
     const hasUnavailableDetail = Boolean(message || factorAvailableThrough);
-    return <EmptyState text={hasUnavailableDetail ? unavailableMessage : t(lang, "emptyAlpha")} />;
+    return (
+      <EmptyState
+        text={
+          hasUnavailableDetail || market === "cn"
+            ? unavailableMessage
+            : t(lang, "emptyAlpha")
+        }
+      />
+    );
   }
 
   const provenance = data as ProvenanceFields;
@@ -138,7 +149,7 @@ export default function AlphaTab({
         </div>
       )}
 
-      {market !== "us" && (
+      {market !== "us" && market !== "cn" && (
         <div className="rounded-lg border border-sky-400/30 bg-sky-400/10 px-3 py-3 text-sm text-sky-700 dark:text-sky-200 sm:px-4">
           <div className="flex items-start gap-3">
             <AlertTriangle size={18} className="mt-0.5 shrink-0" />

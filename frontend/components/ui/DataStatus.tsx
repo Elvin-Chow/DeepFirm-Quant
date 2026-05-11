@@ -10,6 +10,10 @@ interface DataStatusProps {
   sourceDetail?: string;
   warnings?: string[];
   factorSource?: string;
+  benchmarkSource?: string;
+  benchmarkSourceDetail?: string;
+  riskFreeRateSource?: string;
+  riskFreeRateSourceDetail?: string;
   compact?: boolean;
 }
 
@@ -19,11 +23,21 @@ export default function DataStatus({
   sourceDetail,
   warnings = [],
   factorSource,
+  benchmarkSource,
+  benchmarkSourceDetail,
+  riskFreeRateSource,
+  riskFreeRateSourceDetail,
   compact = false,
 }: DataStatusProps) {
   const cleanWarnings = warnings.filter(Boolean);
   const sourceLabel = localizeProvider(sourceDetail || source, lang);
   const factorLabel = factorSource ? localizeProvider(factorSource, lang) : "";
+  const benchmarkLabel = benchmarkSource || benchmarkSourceDetail
+    ? localizeProvider(benchmarkSourceDetail || benchmarkSource, lang)
+    : "";
+  const riskFreeRateLabel = riskFreeRateSource || riskFreeRateSourceDetail
+    ? localizeProvider(riskFreeRateSourceDetail || riskFreeRateSource, lang)
+    : "";
   const warningCount = cleanWarnings.length;
   const visibleWarnings = cleanWarnings.slice(0, compact ? 4 : 12);
   const hiddenCount = Math.max(warningCount - visibleWarnings.length, 0);
@@ -40,6 +54,18 @@ export default function DataStatus({
           <span className="inline-flex w-full min-w-0 items-center gap-2 sm:w-auto">
             <span className="shrink-0 font-medium">{t(lang, "factorDataSource")}</span>
             <span className="truncate font-semibold text-df-text">{factorLabel}</span>
+          </span>
+        )}
+        {benchmarkLabel && (
+          <span className="inline-flex w-full min-w-0 items-center gap-2 sm:w-auto">
+            <span className="shrink-0 font-medium">{t(lang, "benchmarkDataSource")}</span>
+            <span className="truncate font-semibold text-df-text">{benchmarkLabel}</span>
+          </span>
+        )}
+        {riskFreeRateLabel && (
+          <span className="inline-flex w-full min-w-0 items-center gap-2 sm:w-auto">
+            <span className="shrink-0 font-medium">{t(lang, "riskFreeRateSource")}</span>
+            <span className="truncate font-semibold text-df-text">{riskFreeRateLabel}</span>
           </span>
         )}
         {warningCount > 0 && (

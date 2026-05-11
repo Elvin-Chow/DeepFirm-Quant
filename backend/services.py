@@ -2,10 +2,13 @@
 
 import asyncio
 import logging
+import queue
+import threading
 import time
 from datetime import date, datetime, timedelta
-from typing import Callable, List, Literal, Optional, TypeVar
+from typing import Callable, List, Optional, TypeVar, cast
 
+import akshare as ak
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel
@@ -13,9 +16,13 @@ from pydantic import BaseModel
 from backend.schemas import AnalysisRunRequest, AnalysisRunResult, PortfolioOptimizeRequest
 from data_pipeline import MarketAligner, SmartFetcher
 from data_pipeline.exceptions import DataFetcherError
+from models.market_validation import MarketMode
 from models import (
     AllocationPolicyEngine,
     BayesianOptimizer,
+    CrisisWarningResult,
+    CrisisWarningService,
+    CrisisWarningUnavailableError,
     FactorAnalyzer,
     FactorRegressionResult,
     MarketRegimeDetector,
@@ -31,11 +38,11 @@ from models import (
 )
 
 T = TypeVar("T")
-MarketMode = Literal["us", "hk", "mixed"]
 
 BENCHMARKS: dict[MarketMode, tuple[str, str]] = {
     "us": ("SPY", "SPDR S&P 500 ETF Trust"),
     "hk": ("^HSI", "Hang Seng Index"),
+    "cn": ("000300", "CSI 300 Index"),
     "mixed": ("ACWI", "iShares MSCI ACWI ETF"),
 }
 DEFAULT_RISK_FREE_RATE = 0.02
@@ -51,12 +58,17 @@ class PortfolioAnalysisService:
         factor_analyzer: Optional[FactorAnalyzer] = None,
         optimizer: Optional[BayesianOptimizer] = None,
         allocation_policy_engine: Optional[AllocationPolicyEngine] = None,
+        crisis_warning_service: Optional[CrisisWarningService] = None,
         logger: Optional[logging.Logger] = None,
     ) -> None:
         self.aligner = aligner or MarketAligner()
         self.factor_analyzer = factor_analyzer or FactorAnalyzer()
         self.optimizer = optimizer or BayesianOptimizer()
         self.allocation_policy_engine = allocation_policy_engine or AllocationPolicyEngine()
+        self.crisis_warning_service = crisis_warning_service or CrisisWarningService(
+            aligner=self.aligner,
+            logger=logger,
+        )
         self.logger = logger or logging.getLogger(__name__)
 
     @staticmethod
@@ -104,15 +116,167 @@ class PortfolioAnalysisService:
         self.attach_data_provenance(result, fetcher)
         return result
 
+    @staticmethod
+    def normalize_benchmark_prices(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """Normalize benchmark prices into Date and Close columns."""
+        if df.empty:
+            raise DataFetcherError(
+                message=f"empty benchmark dataframe for {symbol}",
+                symbol=symbol,
+                source="benchmark",
+            )
+
+        if "Date" in df.columns:
+            date_col = "Date"
+        elif "日期" in df.columns:
+            date_col = "日期"
+        else:
+            date_col = df.columns[0]
+
+        if "Close" in df.columns:
+            close_col = "Close"
+        elif "收盘" in df.columns:
+            close_col = "收盘"
+        else:
+            raise DataFetcherError(
+                message=f"missing benchmark close column for {symbol}",
+                symbol=symbol,
+                source="benchmark",
+            )
+
+        dates = pd.to_datetime(df[date_col], errors="coerce")
+        close = pd.to_numeric(df[close_col], errors="coerce")
+        if dates.isna().any():
+            raise ValueError(f"unparseable benchmark dates for {symbol}")
+        close_values = close.to_numpy(dtype=float)
+        if not np.isfinite(close_values).all():
+            raise ValueError(f"non-finite benchmark close prices for {symbol}")
+        if (close_values <= 0.0).any():
+            raise ValueError(f"non-positive benchmark close prices for {symbol}")
+
+        normalized = pd.DataFrame({"Date": dates.dt.tz_localize(None).dt.normalize(), "Close": close_values})
+        normalized = normalized.sort_values("Date")
+        normalized = normalized.drop_duplicates(subset=["Date"], keep="last")
+        if len(normalized) < 2:
+            raise ValueError(f"at least two valid benchmark prices are required for {symbol}")
+        return normalized.reset_index(drop=True)
+
+    @staticmethod
+    def normalize_cn_benchmark_yahoo_symbol(symbol: str) -> str:
+        """Normalize a China benchmark symbol for Yahoo Finance fallback."""
+        if symbol == "000300":
+            return "000300.SS"
+        return SmartFetcher._normalize_cn_yahoo_symbol(symbol)
+
+    @staticmethod
+    def call_provider_with_timeout(
+        provider_name: str,
+        timeout_seconds: float,
+        provider_call: Callable[[], pd.DataFrame],
+    ) -> pd.DataFrame:
+        """Run a blocking provider call with a bounded wait."""
+        result_queue: queue.Queue[tuple[bool, object]] = queue.Queue(maxsize=1)
+
+        def run_provider() -> None:
+            try:
+                result_queue.put((True, provider_call()))
+            except Exception as exc:
+                result_queue.put((False, exc))
+
+        worker = threading.Thread(
+            target=run_provider,
+            name=f"{provider_name}-fetch",
+            daemon=True,
+        )
+        worker.start()
+        worker.join(timeout_seconds)
+        if worker.is_alive():
+            raise TimeoutError(f"{provider_name} timed out after {timeout_seconds:.1f}s")
+
+        succeeded, value = result_queue.get_nowait()
+        if succeeded:
+            return cast(pd.DataFrame, value)
+        if isinstance(value, BaseException):
+            raise value
+        raise RuntimeError(f"{provider_name} failed without an exception")
+
+    def fetch_benchmark_prices(
+        self,
+        fetcher: SmartFetcher,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        market: MarketMode,
+    ) -> pd.DataFrame:
+        """Fetch benchmark prices for the selected market mode."""
+        if market == "cn":
+            provider_errors: list[str] = []
+            start_str = start_date.strftime("%Y%m%d")
+            end_str = end_date.strftime("%Y%m%d")
+            if fetcher.is_china_akshare_cooling_down():
+                provider_errors.append("akshare: skipped during provider cooldown")
+            else:
+                try:
+                    df = self.call_provider_with_timeout(
+                        "akshare_cn_benchmark",
+                        SmartFetcher._akshare_timeout_seconds(),
+                        lambda: ak.index_zh_a_hist(
+                            symbol=symbol,
+                            period="daily",
+                            start_date=start_str,
+                            end_date=end_str,
+                        ),
+                    )
+                    fetcher._mark_source("akshare", "AKShare CSI 300 index daily")
+                    return self.normalize_benchmark_prices(df, symbol)
+                except Exception as exc:
+                    fetcher._register_china_akshare_failure()
+                    provider_errors.append(f"akshare: {exc}")
+                    self.logger.warning("AKShare China benchmark fetch failed for %s: %s", symbol, exc)
+
+            try:
+                yahoo_symbol = self.normalize_cn_benchmark_yahoo_symbol(symbol)
+                df = fetcher._fetch_yahoo_chart(yahoo_symbol, start_date, end_date)
+                fetcher._mark_source("yahoo_chart", "Yahoo Finance chart API (CSI 300 fallback)")
+                fetcher._append_warning(
+                    f"{symbol}: AKShare benchmark data was unavailable; using Yahoo Finance fallback"
+                )
+                return self.normalize_benchmark_prices(df, symbol)
+            except Exception as exc:
+                provider_errors.append(f"yahoo_chart: {exc}")
+                self.logger.warning("Yahoo China benchmark fallback failed for %s: %s", symbol, exc)
+
+            if fetcher.allow_sandbox_data:
+                df = fetcher._fetch_sandbox(symbol, start_date, end_date)
+                fetcher._mark_source("sandbox", "sandbox demo")
+                fetcher._append_warning(f"{symbol}: using sandbox demo benchmark prices")
+                return self.normalize_benchmark_prices(df, symbol)
+
+            raise DataFetcherError(
+                message=(
+                    f"Unable to fetch real China benchmark data for {symbol}. "
+                    + "; ".join(provider_errors)
+                ),
+                symbol=symbol,
+                source="benchmark",
+            )
+
+        bench_resp = fetcher.fetch_us_equity(
+            symbol,
+            start_date,
+            end_date,
+        )
+        return self.normalize_benchmark_prices(bench_resp.data, symbol)
+
     def resolve_risk_free_rate(
         self,
         fetcher: SmartFetcher,
         requested_rate: Optional[float],
         asof: Optional[date] = None,
-    ) -> tuple[float, str, list[str]]:
+    ) -> tuple[float, str, str, list[str]]:
         """Return the risk-free rate, source label, and non-fatal warnings."""
         if requested_rate is not None:
-            return float(requested_rate), "request", []
+            return float(requested_rate), "request", "Request override", []
         try:
             end = asof if asof is not None else datetime.now().date()
             start = end - timedelta(days=7)
@@ -120,11 +284,12 @@ class PortfolioAnalysisService:
             latest = float(resp.data["Close"].iloc[-1])
             if latest > 0.5:
                 latest = latest / 100.0
-            return latest, RISK_FREE_TICKER, []
+            return latest, RISK_FREE_TICKER, "US 13-week Treasury bill proxy", []
         except Exception:
             return (
                 DEFAULT_RISK_FREE_RATE,
                 "fallback",
+                "Deterministic fallback (2.00% annualized)",
                 ["Risk-free rate was unavailable; defaulted to 2.00% annualized."],
             )
 
@@ -133,8 +298,12 @@ class PortfolioAnalysisService:
         tickers: List[str],
         cov_matrix: Optional[np.ndarray] = None,
         asof: Optional[date] = None,
+        market: MarketMode = "us",
     ) -> Optional[List[float]]:
         """Fetch market capitalization or use a non-leaking inverse-volatility proxy."""
+        if market == "cn":
+            return None
+
         if (
             asof is not None
             and asof < datetime.now().date()
@@ -325,6 +494,18 @@ class PortfolioAnalysisService:
             return result
 
         def build_alpha() -> Optional[FactorRegressionResult]:
+            if payload.market == "cn":
+                alpha_meta.update(
+                    {
+                        "status": "unavailable",
+                        "message": "China A-share factor attribution is not supported yet.",
+                        "factor_available_through": None,
+                        "effective_start": None,
+                        "effective_end": None,
+                    }
+                )
+                return None
+
             try:
                 result = self.run_alpha_from_prices(
                     payload.start_date,
@@ -403,12 +584,43 @@ class PortfolioAnalysisService:
             except ValueError:
                 return None
 
-        risk_result, alpha_result, anomaly_result, regime_result, ml_result = await asyncio.gather(
+        def build_crisis_warning() -> Optional[CrisisWarningResult]:
+            if not payload.crisis_enabled:
+                return None
+            try:
+                return self.crisis_warning_service.evaluate_from_prices(
+                    tickers=payload.tickers,
+                    price_df=price_df,
+                    weights=payload.weights,
+                    horizon=payload.crisis_horizon,
+                    source=portfolio_source,
+                    source_detail=portfolio_source_detail,
+                    data_warnings=list(fetcher.data_warnings),
+                )
+            except CrisisWarningUnavailableError as exc:
+                self.logger.warning(
+                    "crisis warning unavailable tickers=%s horizon=%s error=%s",
+                    ",".join(payload.tickers),
+                    payload.crisis_horizon,
+                    exc,
+                )
+                return None
+            except ValueError as exc:
+                self.logger.warning(
+                    "crisis warning failed tickers=%s horizon=%s error=%s",
+                    ",".join(payload.tickers),
+                    payload.crisis_horizon,
+                    exc,
+                )
+                return None
+
+        risk_result, alpha_result, anomaly_result, regime_result, ml_result, crisis_result = await asyncio.gather(
             asyncio.to_thread(self.timed_stage, timings, "risk", build_risk),
             asyncio.to_thread(self.timed_stage, timings, "alpha", build_alpha),
             asyncio.to_thread(self.timed_stage, timings, "anomaly", build_anomaly),
             asyncio.to_thread(self.timed_stage, timings, "regime", build_regime),
             asyncio.to_thread(self.timed_stage, timings, "ml_forecast", build_ml),
+            asyncio.to_thread(self.timed_stage, timings, "crisis_warning", build_crisis_warning),
         )
 
         opt_payload = PortfolioOptimizeRequest(
@@ -468,6 +680,7 @@ class PortfolioAnalysisService:
             anomaly=anomaly_result,
             regime=regime_result,
             ml_forecast=ml_result,
+            crisis_warning=crisis_result,
         )
 
     def optimize_portfolio_from_prices(
@@ -528,13 +741,28 @@ class PortfolioAnalysisService:
 
         risk_free_rate = 0.0
         risk_free_rate_source = ""
+        risk_free_rate_source_detail = ""
         methodology_warnings: list[str] = []
         if payload.backtest_enabled:
-            risk_free_rate, risk_free_rate_source, risk_free_warnings = self.resolve_risk_free_rate(
-                fetcher,
-                payload.risk_free_rate,
-                asof=asof,
-            )
+            if payload.market == "cn" and payload.risk_free_rate is None:
+                risk_free_rate = DEFAULT_RISK_FREE_RATE
+                risk_free_rate_source = "fallback"
+                risk_free_rate_source_detail = "China A-share policy fallback (2.00% annualized)"
+                risk_free_warnings = [
+                    "China A-share risk-free rate is unavailable; defaulted to 2.00% annualized.",
+                    "China A-share OOS benchmark uses CSI 300 Index (000300).",
+                ]
+            else:
+                (
+                    risk_free_rate,
+                    risk_free_rate_source,
+                    risk_free_rate_source_detail,
+                    risk_free_warnings,
+                ) = self.resolve_risk_free_rate(
+                    fetcher,
+                    payload.risk_free_rate,
+                    asof=asof,
+                )
             methodology_warnings.extend(risk_free_warnings)
 
         regularization_boost = 1.0
@@ -549,11 +777,17 @@ class PortfolioAnalysisService:
                 payload.tickers,
                 cov_matrix=initial_cov_matrix,
                 asof=asof,
+                market=payload.market,
             )
             if market_caps is None:
-                methodology_warnings.append(
-                    "Market-cap prior was unavailable; optimizer used inverse-volatility equilibrium."
-                )
+                if payload.market == "cn":
+                    methodology_warnings.append(
+                        "China A-share market-cap prior is unavailable; optimizer used inverse-volatility equilibrium."
+                    )
+                else:
+                    methodology_warnings.append(
+                        "Market-cap prior was unavailable; optimizer used inverse-volatility equilibrium."
+                    )
 
         if not payload.backtest_enabled:
             result = self.optimizer.optimize_with_views(
@@ -573,6 +807,7 @@ class PortfolioAnalysisService:
             result.allocation_policy = allocation_policy
             result.risk_free_rate = risk_free_rate
             result.risk_free_rate_source = risk_free_rate_source
+            result.risk_free_rate_source_detail = risk_free_rate_source_detail
             result.methodology_warnings = methodology_warnings
             self.attach_data_provenance(result, fetcher)
             result.source = portfolio_source
@@ -581,12 +816,16 @@ class PortfolioAnalysisService:
 
         benchmark_symbol, benchmark_name = BENCHMARKS.get(payload.market, BENCHMARKS["us"])
 
-        bench_resp = fetcher.fetch_us_equity(
+        bench_df = self.fetch_benchmark_prices(
+            fetcher,
             benchmark_symbol,
             payload.start_date,
             payload.end_date,
+            payload.market,
         )
-        bench_prices = bench_resp.data.set_index("Date")["Close"]
+        benchmark_source = fetcher.last_source
+        benchmark_source_detail = fetcher.last_source_detail
+        bench_prices = bench_df.set_index("Date")["Close"]
         bench_prices.index = pd.to_datetime(bench_prices.index).tz_localize(None).normalize()
         bench_returns = np.log(bench_prices / bench_prices.shift(1)).dropna()
 
@@ -620,6 +859,7 @@ class PortfolioAnalysisService:
                     payload.tickers,
                     cov_matrix=roll_cov,
                     asof=roll_asof,
+                    market=payload.market,
                 )
 
             sub_result = self.optimizer.optimize_with_views(
@@ -727,8 +967,11 @@ class PortfolioAnalysisService:
         result.backtest_enabled = True
         result.benchmark_symbol = benchmark_symbol
         result.benchmark_name = benchmark_name
+        result.benchmark_source = benchmark_source
+        result.benchmark_source_detail = benchmark_source_detail
         result.risk_free_rate = risk_free_rate
         result.risk_free_rate_source = risk_free_rate_source
+        result.risk_free_rate_source_detail = risk_free_rate_source_detail
         result.methodology_warnings = methodology_warnings
         result.oos_dates = opt_metrics["dates"]
         result.oos_optimized_cum_returns = opt_metrics["cumulative_returns"]

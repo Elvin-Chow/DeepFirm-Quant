@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { BarChart3, Shield, TrendingUp, Scale, Sparkles, Menu } from "lucide-react";
+import { Activity, BarChart3, Shield, TrendingUp, Scale, Sparkles, Menu } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import RiskTab from "@/components/RiskTab";
 import AlphaTab from "@/components/AlphaTab";
 import DecisionTab from "@/components/DecisionTab";
 import MachineLearningTab from "@/components/MachineLearningTab";
+import CrisisWarningTab from "@/components/CrisisWarningTab";
 import WelcomeTab from "@/components/WelcomeTab";
 import { postApi } from "@/hooks/useApi";
 import { useLanguage } from "@/hooks/useLanguage";
@@ -16,16 +17,24 @@ import {
   RiskAnomalyResult,
   RiskRegimeResult,
   RiskMLForecastResult,
+  CrisisWarningResult,
   FactorRegressionResult,
   PortfolioOptimizeRequest,
   OptimizationResult,
   AnalysisRunRequest,
   AnalysisRunResult,
+  MarketMode,
 } from "@/types/api";
 import { t, type Lang } from "@/lib/i18n";
+import { getCurrencySymbol } from "@/lib/currency";
 
-type TabKey = "welcome" | "risk" | "ml" | "alpha" | "decision";
-type MarketMode = "us" | "hk" | "mixed";
+type TabKey = "welcome" | "risk" | "crisis" | "ml" | "alpha" | "decision";
+type TabConfig = {
+  key: TabKey;
+  label: string;
+  mobileLabel: string;
+  icon: React.ElementType;
+};
 type RegimeModelType = NonNullable<AnalysisRunRequest["regime_model_type"]>;
 type MLForecastHorizon = NonNullable<AnalysisRunRequest["ml_horizon"]>;
 type AllocationMode = NonNullable<PortfolioOptimizeRequest["allocation_mode"]>;
@@ -33,18 +42,21 @@ type AllocationMode = NonNullable<PortfolioOptimizeRequest["allocation_mode"]>;
 const MARKET_NAV_OPTIONS: { key: MarketMode; label: string; title: string }[] = [
   { key: "us", label: "US", title: "US Market" },
   { key: "hk", label: "HK", title: "HK Market" },
+  { key: "cn", label: "CN", title: "China A-Share Market" },
   { key: "mixed", label: "Mix", title: "Mixed Market" },
 ];
 
 const DEFAULT_TICKERS_BY_MARKET: Record<MarketMode, string> = {
   us: "AAPL,NVDA,GOOG,TSM",
   hk: "0005.HK,0007.HK",
+  cn: "600519,300750,000001",
   mixed: "AAPL,NVDA,0005.HK,0007.HK",
 };
 
 const FLAG_ASSETS = {
   us: "https://cdn.jsdelivr.net/gh/lipis/flag-icons/flags/4x3/us.svg",
   hk: "https://cdn.jsdelivr.net/gh/lipis/flag-icons/flags/4x3/hk.svg",
+  cn: "https://cdn.jsdelivr.net/gh/lipis/flag-icons/flags/4x3/cn.svg",
 } as const;
 
 function FlagImage({
@@ -54,14 +66,17 @@ function FlagImage({
   code: keyof typeof FLAG_ASSETS;
   className?: string;
 }) {
+  const cnImageClass = code === "cn" ? "object-cover object-left" : "object-cover";
+  const cnBackground = code === "cn" ? "bg-[#de2910]" : "bg-transparent";
+
   return (
     <span
-      className={`block h-7 w-7 overflow-hidden rounded-full bg-transparent ${className}`}
+      className={`block h-7 w-7 overflow-hidden rounded-full ${cnBackground} ${className}`}
     >
       <img
         src={FLAG_ASSETS[code]}
         alt={`${code.toUpperCase()} flag`}
-        className="h-full w-full object-cover"
+        className={`h-full w-full ${cnImageClass}`}
         loading="lazy"
         decoding="async"
         referrerPolicy="no-referrer"
@@ -114,19 +129,38 @@ function hasHkSuffix(ticker: string): boolean {
   return ticker.toUpperCase().endsWith(".HK");
 }
 
+function isCnTicker(ticker: string): boolean {
+  return /^\d{6}$/.test(ticker);
+}
+
 function getMarketValidationError(
   tickerList: string[],
   selectedMarket: MarketMode,
   lang: Lang
 ): string | null {
   if (selectedMarket === "mixed") {
-    return null;
+    const cnTickers = tickerList.filter(isCnTicker);
+    return cnTickers.length > 0
+      ? `${t(lang, "errorMixedMarketNoCn")} ${cnTickers.join(", ")}`
+      : null;
   }
 
   if (selectedMarket === "us") {
     const hkTickers = tickerList.filter(hasHkSuffix);
-    return hkTickers.length > 0
-      ? `${t(lang, "errorUsMarketNoHk")} ${hkTickers.join(", ")}`
+    if (hkTickers.length > 0) {
+      return `${t(lang, "errorUsMarketNoHk")} ${hkTickers.join(", ")}`;
+    }
+    const cnTickers = tickerList.filter(isCnTicker);
+    if (cnTickers.length > 0) {
+      return `${t(lang, "errorUsMarketNoCn")} ${cnTickers.join(", ")}`;
+    }
+    return null;
+  }
+
+  if (selectedMarket === "cn") {
+    const nonCnTickers = tickerList.filter((ticker) => !isCnTicker(ticker));
+    return nonCnTickers.length > 0
+      ? `${t(lang, "errorCnMarketOnlySixDigit")} ${nonCnTickers.join(", ")}`
       : null;
   }
 
@@ -172,6 +206,7 @@ export default function Home() {
   const [anomalyData, setAnomalyData] = useState<RiskAnomalyResult | null>(null);
   const [regimeData, setRegimeData] = useState<RiskRegimeResult | null>(null);
   const [mlForecastData, setMlForecastData] = useState<RiskMLForecastResult | null>(null);
+  const [crisisWarningData, setCrisisWarningData] = useState<CrisisWarningResult | null>(null);
   const [alphaData, setAlphaData] = useState<FactorRegressionResult | null>(null);
   const [alphaStatus, setAlphaStatus] = useState<AnalysisRunResult["alpha_status"]>("unavailable");
   const [alphaMessage, setAlphaMessage] = useState("");
@@ -182,6 +217,7 @@ export default function Home() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [analysisCompleted, setAnalysisCompleted] = useState(false);
 
   const handleMarketChange = useCallback((nextMarket: MarketMode) => {
     setMarket(nextMarket);
@@ -201,9 +237,15 @@ export default function Home() {
     });
   }, [tickers]);
 
+  useEffect(() => {
+    if (market === "cn" && activeTab === "alpha") {
+      setActiveTab("risk");
+    }
+  }, [market, activeTab]);
+
   const handleRun = useCallback(async () => {
     setError(null);
-    setActiveTab((current) => (current === "ml" ? "ml" : "risk"));
+    setActiveTab((current) => (current === "ml" || current === "crisis" ? current : "risk"));
 
     const tickerList = tickers.split(",").map((t) => t.trim()).filter(Boolean);
     if (tickerList.length === 0) {
@@ -238,7 +280,9 @@ export default function Home() {
     }
 
     setLoading(true);
+    setAnalysisCompleted(false);
     setMlForecastData(null);
+    setCrisisWarningData(null);
     const { start, end } = computeDateRange(timeWindow);
     const normalizedWeights =
       hasCustomWeights
@@ -269,6 +313,8 @@ export default function Home() {
       ml_horizon: mlHorizon,
       ml_confidence_level: 0.95,
       regime_model_type: regimeModelType,
+      crisis_enabled: true,
+      crisis_horizon: mlHorizon,
       max_weight: maxWeight,
       min_weight: minWeight,
       turnover_penalty: turnoverPenalty,
@@ -288,6 +334,7 @@ export default function Home() {
       setAnomalyData(result.anomaly ?? null);
       setRegimeData(result.regime ?? null);
       setMlForecastData(result.ml_forecast ?? null);
+      setCrisisWarningData(result.crisis_warning ?? null);
       setAlphaData(result.alpha ?? null);
       setAlphaStatus(result.alpha_status ?? result.alpha?.alpha_status ?? "unavailable");
       setAlphaMessage(result.alpha_message ?? "");
@@ -295,8 +342,10 @@ export default function Home() {
       setAlphaEffectiveStart(result.alpha_effective_start ?? result.alpha?.alpha_effective_start ?? null);
       setAlphaEffectiveEnd(result.alpha_effective_end ?? result.alpha?.alpha_effective_end ?? null);
       setOptData(result.optimization);
+      setAnalysisCompleted(true);
     } catch (err: any) {
       setError(err.message || "Analysis failed. Please check your inputs and try again.");
+      setAnalysisCompleted(false);
     } finally {
       setLoading(false);
     }
@@ -370,18 +419,18 @@ export default function Home() {
     setApiKey(preset.apiKey);
   }, []);
 
-  const tabs: {
-    key: TabKey;
-    label: string;
-    mobileLabel: string;
-    icon: React.ElementType;
-  }[] = [
+  const allTabs: TabConfig[] = [
     { key: "welcome", label: t(lang, "welcome"), mobileLabel: t(lang, "welcome"), icon: Sparkles },
     { key: "risk", label: t(lang, "risk"), mobileLabel: t(lang, "risk"), icon: Shield },
+    { key: "crisis", label: t(lang, "crisisWarningNav"), mobileLabel: t(lang, "crisisWarningMobile"), icon: Activity },
     { key: "ml", label: t(lang, "machineLearningBeta"), mobileLabel: "ML", icon: BarChart3 },
     { key: "alpha", label: t(lang, "alpha"), mobileLabel: t(lang, "alpha"), icon: TrendingUp },
     { key: "decision", label: t(lang, "decision"), mobileLabel: t(lang, "decision"), icon: Scale },
   ];
+  const tabs = allTabs.filter((tab) => market !== "cn" || tab.key !== "alpha");
+  const currencySymbol = getCurrencySymbol(market);
+  const mobileGridClass =
+    tabs.length === 6 ? "grid-cols-6" : tabs.length === 5 ? "grid-cols-5" : "grid-cols-4";
 
   return (
     <div className="flex min-h-screen lg:h-screen lg:overflow-hidden">
@@ -435,6 +484,7 @@ export default function Home() {
         error={error}
         lang={lang}
         setLang={setLang}
+        currencySymbol={currencySymbol}
         presets={presets}
         onSavePreset={handleSavePreset}
         onLoadPreset={handleLoadPreset}
@@ -453,9 +503,9 @@ export default function Home() {
       )}
 
       <main className="min-w-0 flex-1 p-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] sm:p-5 sm:pb-[calc(6.5rem+env(safe-area-inset-bottom))] lg:h-screen lg:overflow-y-auto lg:px-8 lg:py-5">
-        <div className="max-w-7xl mx-auto page-fade-in">
+        <div className="mx-auto flex min-h-[calc(100dvh-9rem)] max-w-7xl flex-col page-fade-in lg:min-h-[calc(100vh-2.5rem)]">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
-            <div>
+            <div className="min-w-0 sm:max-w-md">
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setSidebarOpen(true)}
@@ -473,7 +523,7 @@ export default function Home() {
               </p>
             </div>
 
-            <div className="flex flex-col gap-2 sm:items-end">
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-1 sm:items-end">
               <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:justify-end">
                 <span className="text-[10px] font-medium tracking-[0.12em] text-df-text-secondary">
                   {t(lang, "market")}
@@ -502,7 +552,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="hidden flex-wrap gap-2 lg:flex lg:justify-end">
+              <div className="scrollbar-none -mx-3 hidden w-[calc(100%+1.5rem)] max-w-none flex-nowrap gap-2 overflow-x-auto px-3 pb-1 lg:flex lg:justify-end">
                 {tabs.map((tab) => {
                   const Icon = tab.icon;
                   const isActive = activeTab === tab.key;
@@ -510,14 +560,20 @@ export default function Home() {
                     <button
                       key={tab.key}
                       onClick={() => setActiveTab(tab.key)}
-                      className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-medium transition-all click-press ${
+                      className={`relative isolate flex shrink-0 items-center gap-2 overflow-hidden rounded-full border px-4 py-2.5 text-sm font-medium transition-all click-press ${
                         isActive
-                          ? "bg-gradient-to-r from-df-accent to-df-accent-secondary text-white shadow-lg"
+                          ? "border-transparent text-white"
                           : "bg-df-surface border border-df-border text-df-text-secondary hover:text-df-text hover-lift"
                       }`}
                     >
-                      <Icon size={16} />
-                      {tab.label}
+                      {isActive && (
+                        <span
+                          className="absolute inset-0 rounded-full bg-gradient-to-r from-df-accent to-df-accent-secondary"
+                          aria-hidden="true"
+                        />
+                      )}
+                      <Icon size={16} className="relative z-10" />
+                      <span className="relative z-10">{tab.label}</span>
                     </button>
                   );
                 })}
@@ -537,9 +593,10 @@ export default function Home() {
           )}
 
           {activeTab === "welcome" && <WelcomeTab lang={lang} />}
-          {activeTab === "risk" && <RiskTab data={riskData} loading={loading} lang={lang} />}
+          {activeTab === "risk" && <RiskTab data={riskData} loading={loading} lang={lang} currencySymbol={currencySymbol} />}
+          {activeTab === "crisis" && <CrisisWarningTab crisisWarning={crisisWarningData} loading={loading} hasAnalysisRun={analysisCompleted} lang={lang} />}
           {activeTab === "ml" && <MachineLearningTab data={riskData} anomaly={anomalyData} regime={regimeData} mlForecast={mlForecastData} loading={loading} lang={lang} />}
-          {activeTab === "alpha" && (
+          {market !== "cn" && activeTab === "alpha" && (
             <AlphaTab
               data={alphaData}
               loading={loading}
@@ -553,6 +610,12 @@ export default function Home() {
             />
           )}
           {activeTab === "decision" && <DecisionTab data={optData} loading={loading} lang={lang} minWeight={minWeight} />}
+
+          <footer className="mt-auto pt-8 pb-2 text-center">
+            <span className="inline-flex items-center justify-center rounded-full border border-df-border bg-df-surface/80 px-3.5 py-1.5 text-[11px] font-medium text-df-text-secondary shadow-[0_10px_24px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:bg-df-surface/70">
+              {t(lang, "footerCredit")}
+            </span>
+          </footer>
         </div>
       </main>
 
@@ -560,7 +623,7 @@ export default function Home() {
         className="fixed inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-30 lg:hidden"
         aria-label="Primary navigation"
       >
-        <div className="grid grid-cols-5 gap-1 rounded-2xl border border-df-border bg-df-surface/95 p-1 shadow-[0_18px_40px_rgba(15,23,42,0.18)] backdrop-blur-2xl dark:bg-df-surface/90">
+        <div className={`grid ${mobileGridClass} gap-1 rounded-2xl border border-df-border bg-df-surface/95 p-1 shadow-[0_18px_40px_rgba(15,23,42,0.18)] backdrop-blur-2xl dark:bg-df-surface/90`}>
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.key;
@@ -570,14 +633,20 @@ export default function Home() {
                 type="button"
                 onClick={() => setActiveTab(tab.key)}
                 aria-current={isActive ? "page" : undefined}
-                className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] font-semibold leading-none transition-all click-press ${
+                className={`relative isolate flex min-w-0 flex-col items-center justify-center gap-1 overflow-hidden rounded-xl px-1 py-2 text-[10px] font-semibold leading-none transition-all click-press ${
                   isActive
-                    ? "bg-gradient-to-r from-df-accent to-df-accent-secondary text-white shadow"
+                    ? "text-white"
                     : "text-df-text-secondary hover:bg-df-surface-solid/35 hover:text-df-text"
                 }`}
               >
-                <Icon size={17} className="shrink-0" />
-                <span className="w-full truncate">{tab.mobileLabel}</span>
+                {isActive && (
+                  <span
+                    className="absolute inset-0 rounded-xl bg-gradient-to-r from-df-accent to-df-accent-secondary"
+                    aria-hidden="true"
+                  />
+                )}
+                <Icon size={17} className="relative z-10 shrink-0" />
+                <span className="relative z-10 w-full truncate">{tab.mobileLabel}</span>
               </button>
             );
           })}

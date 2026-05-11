@@ -4,6 +4,7 @@ import { Fragment } from "react";
 import { useTheme } from "@/hooks/useTheme";
 import { RiskEvaluationResult } from "@/types/api";
 import { t, Lang } from "@/lib/i18n";
+import { formatMoney, type CurrencySymbol } from "@/lib/currency";
 import GlassCard from "@/components/ui/GlassCard";
 import MetricCard from "@/components/ui/MetricCard";
 import SectionHeader from "@/components/ui/SectionHeader";
@@ -34,9 +35,10 @@ interface RiskTabProps {
   data: RiskEvaluationResult | null;
   loading: boolean;
   lang: Lang;
+  currencySymbol: CurrencySymbol;
 }
 
-export default function RiskTab({ data, loading, lang }: RiskTabProps) {
+export default function RiskTab({ data, loading, lang, currencySymbol }: RiskTabProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
@@ -98,18 +100,14 @@ export default function RiskTab({ data, loading, lang }: RiskTabProps) {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:gap-4">
         <MetricCard
           label={t(lang, "absLossHistorical")}
-          value={`$${data.absolute_loss_historical.toLocaleString(undefined, {
-            maximumFractionDigits: 0,
-          })}`}
+          value={formatMoney(data.absolute_loss_historical, currencySymbol)}
           icon={TrendingDown}
           helpText={t(lang, "absLossHelp")}
           danger
         />
         <MetricCard
           label={t(lang, "absLossMC")}
-          value={`$${data.absolute_loss_monte_carlo.toLocaleString(undefined, {
-            maximumFractionDigits: 0,
-          })}`}
+          value={formatMoney(data.absolute_loss_monte_carlo, currencySymbol)}
           icon={TrendingDown}
           helpText={t(lang, "absLossHelp")}
           danger

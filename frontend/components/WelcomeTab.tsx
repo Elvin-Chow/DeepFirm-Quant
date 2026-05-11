@@ -17,6 +17,84 @@ const changelogTypeOrder: Record<ChangelogEntry["items"][number]["type"], number
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "V3.5.0",
+    date: "2026-05-11",
+    items: [
+      {
+        type: "added",
+        text: {
+          en: "Backend adds an independent explainable crisis warning API with offline XGBoost artifacts, SHAP/native contribution explanations, and optional unified analysis output.",
+          zh: "后端新增独立可解释危机预警 API，支持离线 XGBoost artifact、SHAP/native 贡献解释，并可选接入统一分析结果。",
+          tc: "後端新增獨立可解釋危機預警 API，支援離線 XGBoost artifact、SHAP/native 貢獻解釋，並可選接入統一分析結果。",
+        },
+      },
+      {
+        type: "added",
+        text: {
+          en: "Frontend adds a standalone Crisis Warning page with probability, warning level, model diagnostics, SHAP drivers, risk reducers, and plain-language interpretation.",
+          zh: "前端新增独立危机预警页面，展示概率、预警等级、模型诊断、SHAP 风险驱动、缓释因素和易读解释。",
+          tc: "前端新增獨立危機預警頁面，展示概率、預警等級、模型診斷、SHAP 風險驅動、緩釋因素和易讀解釋。",
+        },
+      },
+      {
+        type: "added",
+        text: {
+          en: "CN market mode now supports pure China A-share portfolios with CSI 300 benchmark, risk, ML forecast, anomaly, regime, and Decision workflows.",
+          zh: "CN 市场模式现已支持纯 A 股组合，覆盖 CSI 300 基准、风险、机器学习预测、异常检测、市场状态和决策工作流。",
+          tc: "CN 市場模式現已支援純 A 股組合，覆蓋 CSI 300 基準、風險、機器學習預測、異常偵測、市場狀態和決策工作流。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "Crisis warning training now supports a diversified global-domain preset spanning US growth, US cross-asset, US defensive/value, HK large-cap, and CN large-cap samples.",
+          zh: "危机预警训练现在支持多元全球样本域，覆盖美股成长、美股跨资产、美股防御/价值、港股大盘与 A 股大盘组合。",
+          tc: "危機預警訓練現在支援多元全球樣本域，覆蓋美股成長、美股跨資產、美股防禦/價值、港股大盤與 A 股大盤組合。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "CN and HK market currency displays now use ¥ and HK$ for capital and absolute loss values.",
+          zh: "CN 与 HK 市场的资本和绝对亏损金额现在分别显示为 ¥ 与 HK$。",
+          tc: "CN 與 HK 市場的資本和絕對虧損金額現在分別顯示為 ¥ 與 HK$。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "CN market mode now hides the Alpha module and shows clearer benchmark and risk-free rate provenance in Decision results.",
+          zh: "CN 市场模式现在隐藏 Alpha 模块，并在决策结果中展示更清晰的基准与无风险利率来源。",
+          tc: "CN 市場模式現在隱藏 Alpha 模組，並在決策結果中展示更清晰的基準與無風險利率來源。",
+        },
+      },
+      {
+        type: "fixed",
+        text: {
+          en: "Market-data cache coverage is stricter, preventing stale benchmark cache files from shortening OOS backtest windows.",
+          zh: "市场数据缓存覆盖校验更严格，避免陈旧基准缓存把样本外回测窗口静默截短。",
+          tc: "市場資料快取覆蓋校驗更嚴格，避免陳舊基準快取把樣本外回測視窗靜默截短。",
+        },
+      },
+      {
+        type: "fixed",
+        text: {
+          en: "A-share and CSI 300 data fetches now fall back faster when AKShare upstream connections close or time out.",
+          zh: "当 AKShare 上游断连或超时时，A 股与 CSI 300 数据抓取会更快降级到后备数据源。",
+          tc: "當 AKShare 上游斷連或逾時時，A 股與 CSI 300 資料抓取會更快降級到後備資料源。",
+        },
+      },
+      {
+        type: "fixed",
+        text: {
+          en: "A-share price quality notices now flag short samples, duplicate dates, low coverage, and long unchanged close-price runs.",
+          zh: "A 股价格质量提示现在会标记短样本、重复日期、低覆盖率和长时间收盘价不变。",
+          tc: "A 股價格品質提示現在會標記短樣本、重複日期、低覆蓋率和長時間收盤價不變。",
+        },
+      },
+    ],
+  },
+  {
     version: "V3.0.0",
     date: "2026-05-09",
     items: [

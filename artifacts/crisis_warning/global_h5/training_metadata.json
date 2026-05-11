@@ -1,0 +1,149 @@
+{
+  "dependencies": {
+    "numpy": "2.4.4",
+    "pandas": "3.0.2",
+    "xgboost": "3.2.0"
+  },
+  "domain_portfolio_count": 5,
+  "domain_portfolios": [
+    {
+      "market": "us",
+      "n_observations": 2094,
+      "n_training_rows": 2024,
+      "name": "us_growth",
+      "positive_events": 110,
+      "positive_rate": 0.05434782608695652,
+      "tickers": [
+        "AAPL",
+        "MSFT",
+        "NVDA",
+        "GOOG",
+        "TSM"
+      ],
+      "training_end": "2026-04-24",
+      "training_start": "2018-04-06",
+      "weights": [
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ]
+    },
+    {
+      "market": "us",
+      "n_observations": 2094,
+      "n_training_rows": 2024,
+      "name": "us_cross_asset",
+      "positive_events": 121,
+      "positive_rate": 0.059782608695652176,
+      "tickers": [
+        "SPY",
+        "QQQ",
+        "GLD",
+        "SLV"
+      ],
+      "training_end": "2026-04-24",
+      "training_start": "2018-04-06",
+      "weights": [
+        0.4,
+        0.25,
+        0.2,
+        0.15
+      ]
+    },
+    {
+      "market": "us",
+      "n_observations": 2094,
+      "n_training_rows": 2024,
+      "name": "us_defensive_value",
+      "positive_events": 117,
+      "positive_rate": 0.057806324110671936,
+      "tickers": [
+        "PG",
+        "COST",
+        "JPM",
+        "BRK-B"
+      ],
+      "training_end": "2026-04-24",
+      "training_start": "2018-04-06",
+      "weights": [
+        0.25,
+        0.25,
+        0.25,
+        0.25
+      ]
+    },
+    {
+      "market": "hk",
+      "n_observations": 2047,
+      "n_training_rows": 1977,
+      "name": "hk_large_cap",
+      "positive_events": 107,
+      "positive_rate": 0.05412240768841679,
+      "tickers": [
+        "02800.HK",
+        "0005.HK",
+        "03988.HK"
+      ],
+      "training_end": "2026-04-23",
+      "training_start": "2018-04-10",
+      "weights": [
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333
+      ]
+    },
+    {
+      "market": "cn",
+      "n_observations": 1912,
+      "n_training_rows": 1842,
+      "name": "cn_large_cap",
+      "positive_events": 88,
+      "positive_rate": 0.04777415852334419,
+      "tickers": [
+        "600519",
+        "300750",
+        "000001",
+        "601988"
+      ],
+      "training_end": "2026-04-23",
+      "training_start": "2018-09-11",
+      "weights": [
+        0.25,
+        0.25,
+        0.25,
+        0.25
+      ]
+    }
+  ],
+  "model_health": "ok",
+  "model_name": "XGBClassifier",
+  "model_version": "crisis-warning-xgb-h5-2026-05-09",
+  "n_observations": 10241,
+  "n_training_rows": 9891,
+  "positive_events": 543,
+  "positive_rate": 0.05489839247801031,
+  "probability_calibrated": true,
+  "skipped_domain_portfolios": [],
+  "target_definition": "Future 5D portfolio log return below trailing 5% historical 5D return threshold.",
+  "trained_at": "2026-05-09T11:00:55+00:00",
+  "training_domain": "diversified_global",
+  "training_end": "2026-04-24",
+  "training_market_scope": "cn,hk,us",
+  "training_start": "2018-04-06",
+  "validation_metrics": {
+    "brier_score": 0.1640799194574356,
+    "calibrated_brier_score": 0.049950603395700455,
+    "calibrated_log_loss": 0.20423355641850308,
+    "calibration_error": 0.29659027341581945,
+    "log_loss": 0.5043783921599349,
+    "positive_rate": 0.05305709954522486,
+    "pr_auc": 0.0649685468719492,
+    "precision_at_0_60": 0.08465608465608465,
+    "recall_at_0_60": 0.1523809523809524,
+    "roc_auc": 0.5632133963510697,
+    "validation_positive_events": 105.0
+  },
+  "warnings": []
+}

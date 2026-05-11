@@ -101,7 +101,13 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(result.benchmark_symbol, "ACWI")
         self.assertEqual(result.benchmark_name, "iShares MSCI ACWI ETF")
+        self.assertEqual(result.benchmark_source, "benchmark")
+        self.assertEqual(result.benchmark_source_detail, "ACWI")
         self.assertEqual(result.risk_free_rate_source, "fallback")
+        self.assertEqual(
+            result.risk_free_rate_source_detail,
+            "Deterministic fallback (2.00% annualized)",
+        )
         self.assertAlmostEqual(result.risk_free_rate, 0.02)
         self.assertTrue(any("Risk-free rate" in warning for warning in result.methodology_warnings))
 

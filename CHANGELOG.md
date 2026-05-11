@@ -4,6 +4,30 @@ All notable changes to the DeepFirm Quant project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [V3.5.0] - 2026-05-11
+
+### Backend
+- Added an independent explainable crisis warning module with offline XGBoost artifacts, SHAP/native contribution explanations, horizon-specific artifact loading, and `POST /api/v1/risk/crisis-warning`.
+- Added optional `crisis_warning` output to `/api/v1/analysis/run`; unavailable artifacts or crisis inference failures now degrade to `null` without blocking risk, alpha, ML, regime, anomaly, or optimization results.
+- Added offline crisis model training through `scripts/train_crisis_warning_model.py`, including no-leakage tail labels, validation metadata, optional isotonic calibration, and SHAP background sample export.
+- Expanded crisis warning training with a diversified global-domain preset covering US growth, US cross-asset, US defensive/value, HK large-cap, and CN large-cap portfolio samples.
+- Corrected price-cache coverage checks and provider metadata normalization so OOS benchmark series are not silently shortened by stale symbol-level cache files.
+- Added standalone `cn` market mode for pure A-share portfolios, including risk, ML forecast, anomaly, regime, optimization, and CSI 300 OOS benchmark support.
+- Hardened A-share data access with AKShare provenance, Yahoo chart fallback, provider cooldown, and bounded CSI 300 benchmark timeout handling.
+- Added CN-only A-share price quality notices for short samples, duplicate dates, low requested-window coverage, and long unchanged close-price runs.
+- Exposed benchmark and risk-free rate source details in optimization responses for clearer CSI 300 and fallback methodology reporting.
+- Kept China factor attribution unavailable by policy and degraded China market-cap priors to inverse-volatility equilibrium with methodology warnings.
+
+### Frontend
+- Added a standalone Crisis Warning navigation page showing tail-event probability, warning level, model health, calibration state, validation metrics, and training-window metadata.
+- Added detailed plain-language crisis explanations, SHAP risk-driver/reducer panels, a contribution chart, and risk-model limitation copy for clearer interpretation.
+- Added unavailable, loading, and empty states for the crisis warning page so missing artifacts or degraded explanations do not confuse the main workflow.
+- Added CN market navigation, defaults, validation, and Alpha unavailable messaging for China A-share workflows.
+- Hid the Alpha / excess-return module in CN market mode while preserving the backend unavailable policy as an API guardrail.
+- Added localized data-source display for benchmark and risk-free rate provenance in Decision results.
+- CN and HK markets now display local currency symbols (`¥`, `HK$`) for capital input and absolute loss metrics.
+- Updated frontend release notes and package metadata to version `3.5.0`.
+
 ## [V3.0.0] - 2026-05-09
 
 ### Added

@@ -230,6 +230,113 @@ class FetcherCacheTests(unittest.TestCase):
         self.assertNotIn("cached prices", " ".join(fetcher.data_warnings))
         self.assertGreaterEqual(response.records, 20)
 
+    def test_complete_cache_requires_recent_end_coverage(self) -> None:
+        prices = pd.DataFrame(
+            {
+                "Date": pd.date_range("2026-01-01", "2026-01-23", freq="B"),
+                "Close": np.linspace(100.0, 110.0, 17),
+            }
+        )
+
+        with TemporaryDirectory() as tmp_dir:
+            fetcher = SmartFetcher(cache_name=f"{tmp_dir}/http_cache")
+            fetcher._write_result_cache(
+                prices,
+                "us_equity",
+                "AAA",
+                date(2026, 1, 1),
+                date(2026, 1, 30),
+                provider="yfinance",
+            )
+
+            cached = fetcher._read_result_cache(
+                "us_equity",
+                "AAA",
+                date(2026, 1, 1),
+                date(2026, 1, 30),
+            )
+
+        self.assertIsNone(cached)
+
+    def test_incomplete_symbol_cache_falls_through_to_exact_window_cache(self) -> None:
+        short_prices = pd.DataFrame(
+            {
+                "Date": pd.date_range("2026-01-01", "2026-01-23", freq="B"),
+                "Close": np.linspace(100.0, 110.0, 17),
+                "__provider": "yfinance",
+            }
+        )
+        full_prices = pd.DataFrame(
+            {
+                "Date": pd.date_range("2026-01-01", "2026-01-30", freq="B"),
+                "Close": np.linspace(100.0, 112.0, 22),
+                "__provider": "yfinance",
+                "__provider_x": "legacy",
+                "__provider_y": "legacy",
+            }
+        )
+
+        with TemporaryDirectory() as tmp_dir:
+            fetcher = SmartFetcher(cache_name=f"{tmp_dir}/http_cache")
+            short_prices.to_parquet(fetcher._price_cache_path("us_equity", "AAA"), index=False)
+            full_prices.to_parquet(
+                fetcher._result_cache_path(
+                    "us_equity",
+                    "AAA",
+                    date(2026, 1, 1),
+                    date(2026, 1, 30),
+                ),
+                index=False,
+            )
+
+            cached = fetcher._read_result_cache(
+                "us_equity",
+                "AAA",
+                date(2026, 1, 1),
+                date(2026, 1, 30),
+            )
+
+        self.assertIsNotNone(cached)
+        assert cached is not None
+        self.assertEqual(pd.to_datetime(cached["Date"]).max().date(), date(2026, 1, 30))
+        self.assertEqual(list(cached.columns), ["Date", "Close"])
+
+    def test_cache_write_cleans_provider_suffix_columns_before_merge(self) -> None:
+        existing = pd.DataFrame(
+            {
+                "Date": pd.date_range("2026-01-01", "2026-01-09", freq="B"),
+                "Close": np.linspace(100.0, 104.0, 7),
+                "__provider": "yfinance",
+                "__provider_x": "legacy",
+                "__provider_y": "legacy",
+            }
+        )
+        latest = pd.DataFrame(
+            {
+                "Date": pd.date_range("2026-01-12", "2026-01-20", freq="B"),
+                "Close": np.linspace(105.0, 111.0, 7),
+            }
+        )
+
+        with TemporaryDirectory() as tmp_dir:
+            fetcher = SmartFetcher(cache_name=f"{tmp_dir}/http_cache")
+            symbol_path = fetcher._price_cache_path("us_equity", "AAA")
+            existing.to_parquet(symbol_path, index=False)
+
+            fetcher._write_result_cache(
+                latest,
+                "us_equity",
+                "AAA",
+                date(2026, 1, 12),
+                date(2026, 1, 20),
+                provider="yahoo_chart",
+            )
+            stored = pd.read_parquet(symbol_path)
+
+        self.assertEqual(pd.to_datetime(stored["Date"]).min().date(), date(2026, 1, 1))
+        self.assertEqual(pd.to_datetime(stored["Date"]).max().date(), date(2026, 1, 20))
+        self.assertEqual(list(stored.columns), ["Date", "Close", "__provider"])
+
     def test_yfinance_rate_limit_can_use_partial_stale_cache(self) -> None:
         prices = pd.DataFrame(
             {
