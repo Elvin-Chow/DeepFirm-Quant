@@ -556,6 +556,26 @@ class CrisisWarningArtifactStore:
             raise CrisisWarningUnavailableError(detail)
         return artifact
 
+    def ensure(self, horizon: ForecastHorizon) -> CrisisWarningArtifact:
+        """Load a horizon artifact on demand and return it."""
+        horizon_key = int(horizon)
+        artifact = self._artifacts.get(horizon_key)
+        if artifact is not None:
+            return artifact
+        try:
+            artifact = self.load_horizon(horizon)
+        except Exception as exc:
+            self._errors[horizon_key] = str(exc)
+            self.logger.warning(
+                "crisis warning artifact unavailable horizon=%s error=%s",
+                horizon,
+                exc,
+            )
+            raise CrisisWarningUnavailableError(str(exc)) from exc
+        self._artifacts[horizon_key] = artifact
+        self._errors.pop(horizon_key, None)
+        return artifact
+
     def is_ready(self, horizon: ForecastHorizon) -> bool:
         return int(horizon) in self._artifacts
 
@@ -576,8 +596,19 @@ class CrisisWarningService:
     def load_artifacts(self) -> None:
         self.store.load_available()
 
+    def _artifact_for_horizon(self, horizon: ForecastHorizon) -> CrisisWarningArtifact:
+        try:
+            return self.store.get(horizon)
+        except CrisisWarningUnavailableError as exc:
+            if str(exc) != "artifact has not been loaded":
+                raise
+        ensure = getattr(self.store, "ensure", None)
+        if callable(ensure):
+            return ensure(horizon)
+        raise
+
     def evaluate(self, request: CrisisWarningRequest) -> CrisisWarningResult:
-        self.store.get(request.horizon)
+        self._artifact_for_horizon(request.horizon)
         fetcher = SmartFetcher(
             api_key=request.api_key,
             allow_sandbox_data=request.allow_sandbox_data,
@@ -685,7 +716,7 @@ class CrisisWarningService:
         source_detail: str = "unknown",
         data_warnings: Optional[Sequence[str]] = None,
     ) -> CrisisWarningResult:
-        artifact = self.store.get(horizon)
+        artifact = self._artifact_for_horizon(horizon)
         n_assets = len(tickers)
         normalized_weights = RiskEngine._normalize_weights(list(weights), n_assets)
         prices = MLRiskEngine._normalize_price_frame(price_df)

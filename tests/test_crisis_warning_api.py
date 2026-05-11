@@ -145,7 +145,7 @@ class CrisisWarningApiTests(unittest.TestCase):
         self.assertIsNotNone(result.crisis_warning)
         self.assertEqual(result.crisis_warning.warning_level, "High")
 
-    def test_analysis_run_ignores_crisis_warning_failure(self) -> None:
+    def test_analysis_run_requires_crisis_warning_success(self) -> None:
         price_df = make_price_frame()
         risk_result = RiskEvaluationResult(
             tickers=["AAA", "BBB"],
@@ -177,11 +177,13 @@ class CrisisWarningApiTests(unittest.TestCase):
                         with patch.object(api.MarketRegimeDetector, "evaluate_from_prices", side_effect=ValueError("short sample")):
                             with patch.object(api.MLRiskEngine, "evaluate_from_prices", side_effect=ValueError("short sample")):
                                 with patch.object(api.analysis_service.crisis_warning_service, "evaluate_from_prices", side_effect=ValueError("missing feature")):
-                                    with patch.object(api.analysis_service, "optimize_portfolio_from_prices", return_value=optimization_result):
-                                        result = asyncio.run(api.run_analysis(payload))
+                                    with patch.object(api.analysis_service, "optimize_portfolio_from_prices", return_value=optimization_result) as optimize:
+                                        with self.assertRaises(api.HTTPException) as raised:
+                                            asyncio.run(api.run_analysis(payload))
 
-        self.assertIsNone(result.crisis_warning)
-        self.assertEqual(result.optimization.tickers, ["AAA", "BBB"])
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("missing feature", str(raised.exception.detail))
+        optimize.assert_not_called()
 
     def test_analysis_run_skips_crisis_when_disabled(self) -> None:
         price_df = make_price_frame()

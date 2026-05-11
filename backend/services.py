@@ -598,21 +598,21 @@ class PortfolioAnalysisService:
                     data_warnings=list(fetcher.data_warnings),
                 )
             except CrisisWarningUnavailableError as exc:
-                self.logger.warning(
+                self.logger.error(
                     "crisis warning unavailable tickers=%s horizon=%s error=%s",
                     ",".join(payload.tickers),
                     payload.crisis_horizon,
                     exc,
                 )
-                return None
+                raise ValueError(f"Crisis warning artifact is unavailable: {exc}") from exc
             except ValueError as exc:
-                self.logger.warning(
+                self.logger.error(
                     "crisis warning failed tickers=%s horizon=%s error=%s",
                     ",".join(payload.tickers),
                     payload.crisis_horizon,
                     exc,
                 )
-                return None
+                raise
 
         risk_result, alpha_result, anomaly_result, regime_result, ml_result, crisis_result = await asyncio.gather(
             asyncio.to_thread(self.timed_stage, timings, "risk", build_risk),
