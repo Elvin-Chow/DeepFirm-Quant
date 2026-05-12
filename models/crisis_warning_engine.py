@@ -145,6 +145,34 @@ class CalibrationMapping:
         calibrated = float(np.interp(value, self.x_thresholds, self.y_thresholds))
         return float(np.clip(calibrated, 0.0, 1.0))
 
+    def bucket_for(self, probability: float) -> Optional[tuple[float, float, float, float]]:
+        value = float(np.clip(probability, 0.0, 1.0))
+        if self.x_thresholds.size < 2 or self.y_thresholds.size < 2:
+            return None
+        idx = int(np.searchsorted(self.x_thresholds, value, side="right") - 1)
+        idx = max(0, min(idx, self.x_thresholds.size - 2))
+        return (
+            float(self.x_thresholds[idx]),
+            float(self.x_thresholds[idx + 1]),
+            float(self.y_thresholds[idx]),
+            float(self.y_thresholds[idx + 1]),
+        )
+
+    def is_flat_bucket(
+        self,
+        probability: float,
+        min_raw_width: float = 0.05,
+        max_calibrated_delta: float = 0.0025,
+    ) -> bool:
+        bucket = self.bucket_for(probability)
+        if bucket is None:
+            return False
+        x_left, x_right, y_left, y_right = bucket
+        return (
+            (x_right - x_left) >= min_raw_width
+            and abs(y_right - y_left) <= max_calibrated_delta
+        )
+
 
 @dataclass
 class CrisisWarningArtifact:
@@ -583,6 +611,25 @@ class CrisisWarningArtifactStore:
 class CrisisWarningService:
     """Orchestrate stateless crisis warning inference."""
 
+    calibration_bucket_warning = (
+        "Probability calibration is compressed across a wide raw-score range; "
+        "treat this reading as a baseline-calibrated signal."
+    )
+    calibration_base_rate_warning = (
+        "Calibrated probability is close to the training tail-event base rate; "
+        "treat this reading as a weak baseline signal."
+    )
+    weak_roc_auc_warning = (
+        "Crisis warning ROC AUC is weak; treat the probability as contextual."
+    )
+    weak_pr_auc_warning = (
+        "Crisis warning PR AUC is close to the validation base rate; "
+        "treat the probability as contextual."
+    )
+    elevated_calibration_error_warning = (
+        "Crisis warning raw probability calibration error is elevated."
+    )
+
     def __init__(
         self,
         store: Optional[CrisisWarningArtifactStore] = None,
@@ -663,6 +710,60 @@ class CrisisWarningService:
                 clean[str(key)] = numeric
         return clean
 
+    @staticmethod
+    def _optional_metric(metrics: dict[str, float], key: str) -> Optional[float]:
+        value = metrics.get(key)
+        if value is None:
+            return None
+        try:
+            numeric = float(value)
+        except Exception:
+            return None
+        if not np.isfinite(numeric):
+            return None
+        return numeric
+
+    def _validation_quality_warnings(
+        self,
+        validation_metrics: dict[str, float],
+    ) -> list[str]:
+        warnings: list[str] = []
+        roc_auc = self._optional_metric(validation_metrics, "roc_auc")
+        if roc_auc is not None and roc_auc < 0.58:
+            warnings.append(self.weak_roc_auc_warning)
+
+        pr_auc = self._optional_metric(validation_metrics, "pr_auc")
+        validation_positive_rate = self._optional_metric(validation_metrics, "positive_rate")
+        if pr_auc is not None and validation_positive_rate is not None:
+            pr_floor = max(validation_positive_rate * 1.25, validation_positive_rate + 0.01)
+            if pr_auc <= pr_floor:
+                warnings.append(self.weak_pr_auc_warning)
+
+        calibration_error = self._optional_metric(validation_metrics, "calibration_error")
+        if calibration_error is not None and calibration_error > 0.10:
+            warnings.append(self.elevated_calibration_error_warning)
+        return warnings
+
+    def _calibration_warnings(
+        self,
+        artifact: CrisisWarningArtifact,
+        raw_probability: float,
+        calibrated_probability: float,
+    ) -> list[str]:
+        if artifact.calibration is None:
+            return []
+        warnings: list[str] = []
+        if artifact.calibration.is_flat_bucket(raw_probability):
+            warnings.append(self.calibration_bucket_warning)
+
+        positive_rate = self._metadata_float(artifact.metadata, "positive_rate", default=np.nan)
+        if (
+            np.isfinite(positive_rate)
+            and abs(float(calibrated_probability) - positive_rate) <= 0.01
+        ):
+            warnings.append(self.calibration_base_rate_warning)
+        return warnings
+
     def _diagnostics(
         self,
         artifact: CrisisWarningArtifact,
@@ -672,8 +773,18 @@ class CrisisWarningService:
     ) -> CrisisWarningDiagnostics:
         metadata = artifact.metadata
         metadata_warnings = [str(item) for item in metadata.get("warnings", []) or []]
-        all_warnings = list(dict.fromkeys([*metadata_warnings, *(artifact.load_warnings or []), *warnings]))
         validation_metrics = self._clean_metrics(metadata.get("validation_metrics", {}) or {})
+        validation_warnings = self._validation_quality_warnings(validation_metrics)
+        all_warnings = list(
+            dict.fromkeys(
+                [
+                    *metadata_warnings,
+                    *(artifact.load_warnings or []),
+                    *validation_warnings,
+                    *warnings,
+                ]
+            )
+        )
         model_health: CrisisModelHealth = "degraded" if all_warnings else "ok"
         if str(metadata.get("model_health", "")).lower() == "degraded":
             model_health = "degraded"
@@ -736,6 +847,11 @@ class CrisisWarningService:
             else raw_probability
         )
         probability = float(np.clip(probability, 0.0, 1.0))
+        calibration_warnings = self._calibration_warnings(
+            artifact=artifact,
+            raw_probability=raw_probability,
+            calibrated_probability=probability,
+        )
         level = CrisisWarningEngine.warning_level(probability)
 
         shap_values, base_value, shap_fallback_used, shap_warnings = CrisisWarningEngine.shap_values(
@@ -752,7 +868,7 @@ class CrisisWarningService:
             artifact=artifact,
             latest_features=latest_features,
             shap_fallback_used=shap_fallback_used,
-            warnings=shap_warnings,
+            warnings=[*calibration_warnings, *shap_warnings],
         )
 
         target_definition = str(artifact.metadata.get("target_definition") or "") or CrisisWarningEngine.target_definition(

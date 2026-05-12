@@ -17,6 +17,36 @@ const changelogTypeOrder: Record<ChangelogEntry["items"][number]["type"], number
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "V3.5.1",
+    date: "2026-05-12",
+    items: [
+      {
+        type: "changed",
+        text: {
+          en: "Backend crisis warning diagnostics now flag compressed calibration buckets, base-rate-like calibrated probabilities, weak validation metrics, and elevated calibration error.",
+          zh: "后端危机预警诊断现在会标记校准区间压平、接近基准率的校准概率、偏弱验证指标与偏高校准误差。",
+          tc: "後端危機預警診斷現在會標記校準區間壓平、接近基準率的校準概率、偏弱驗證指標與偏高校準誤差。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "The Crisis Warning interpretation and model-audit panels now align cleanly and show denser probability, base-rate, calibration, health, and validation readouts.",
+          zh: "危机预警的如何解读与模型审计面板现在底部对齐，并展示更紧凑的概率、基准率、校准、健康状态与验证读数。",
+          tc: "危機預警的如何解讀與模型審計面板現在底部對齊，並展示更緊湊的概率、基準率、校準、健康狀態與驗證讀數。",
+        },
+      },
+      {
+        type: "added",
+        text: {
+          en: "New crisis warning calibration and validation diagnostics now have English, Simplified Chinese, and Traditional Chinese frontend copy.",
+          zh: "新增危机预警校准与验证诊断的英文、简体中文和繁体中文前端文案。",
+          tc: "新增危機預警校準與驗證診斷的英文、簡體中文和繁體中文前端文案。",
+        },
+      },
+    ],
+  },
+  {
     version: "V3.5.0",
     date: "2026-05-11",
     items: [

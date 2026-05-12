@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from models.crisis_warning_engine import (
+    CalibrationMapping,
     CrisisWarningArtifact,
     CrisisWarningEngine,
     CrisisWarningService,
@@ -50,7 +51,12 @@ class CrisisWarningEngineTests(unittest.TestCase):
             columns.append(base + shocks + 0.001 * np.cos(x * (1.0 + idx * 0.05)))
         return np.column_stack(columns)
 
-    def _artifact(self, probability: float = 0.72) -> CrisisWarningArtifact:
+    def _artifact(
+        self,
+        probability: float = 0.72,
+        calibration: CalibrationMapping | None = None,
+        metadata_overrides: dict | None = None,
+    ) -> CrisisWarningArtifact:
         feature_names = CrisisWarningEngine.feature_columns
         metadata = {
             "model_name": "XGBClassifier",
@@ -64,6 +70,7 @@ class CrisisWarningEngineTests(unittest.TestCase):
             "validation_metrics": {"validation_positive_events": 4.0, "roc_auc": 0.75},
             "warnings": [],
         }
+        metadata.update(metadata_overrides or {})
         schema = {
             "feature_names": feature_names,
             "feature_count": len(feature_names),
@@ -76,7 +83,7 @@ class CrisisWarningEngineTests(unittest.TestCase):
             feature_schema=schema,
             metadata=metadata,
             background_sample=pd.DataFrame(columns=feature_names),
-            calibration=None,
+            calibration=calibration,
             load_warnings=[],
         )
 
@@ -169,6 +176,108 @@ class CrisisWarningEngineTests(unittest.TestCase):
         self.assertEqual(result.source, "test")
         payload = json.loads(result.model_dump_json())
         self.assertIn("crisis_probability", payload)
+
+    def test_service_warns_when_calibration_bucket_is_flat_and_near_base_rate(self) -> None:
+        prices = self._prices_from_returns(self._tail_rich_returns(rows=140))
+        calibration = CalibrationMapping(
+            x_thresholds=np.array([0.10, 0.20, 0.30, 0.40]),
+            y_thresholds=np.array([0.02, 0.04, 0.057, 0.057]),
+        )
+        artifact = self._artifact(
+            probability=0.35,
+            calibration=calibration,
+            metadata_overrides={
+                "positive_rate": 0.054,
+                "validation_metrics": {
+                    "validation_positive_events": 20.0,
+                    "positive_rate": 0.05,
+                    "roc_auc": 0.72,
+                    "pr_auc": 0.18,
+                    "calibration_error": 0.02,
+                },
+            },
+        )
+
+        with patch.object(CrisisWarningEngine, "shap_values", return_value=(np.zeros(len(CrisisWarningEngine.feature_columns)), 0.05, False, [])):
+            result = CrisisWarningService(store=FakeStore(artifact)).evaluate_from_prices(
+                tickers=["AAA0", "AAA1"],
+                price_df=prices,
+                weights=[0.5, 0.5],
+                horizon=5,
+            )
+
+        self.assertAlmostEqual(result.crisis_probability, 0.057)
+        self.assertEqual(result.diagnostics.model_health, "degraded")
+        self.assertIn(
+            CrisisWarningService.calibration_bucket_warning,
+            result.diagnostics.warnings,
+        )
+        self.assertIn(
+            CrisisWarningService.calibration_base_rate_warning,
+            result.diagnostics.warnings,
+        )
+
+    def test_service_degrades_weak_validation_metrics(self) -> None:
+        prices = self._prices_from_returns(self._tail_rich_returns(rows=140))
+        artifact = self._artifact(
+            probability=0.18,
+            metadata_overrides={
+                "validation_metrics": {
+                    "validation_positive_events": 20.0,
+                    "positive_rate": 0.05,
+                    "roc_auc": 0.56,
+                    "pr_auc": 0.055,
+                    "calibration_error": 0.12,
+                },
+            },
+        )
+
+        with patch.object(CrisisWarningEngine, "shap_values", return_value=(np.zeros(len(CrisisWarningEngine.feature_columns)), 0.05, False, [])):
+            result = CrisisWarningService(store=FakeStore(artifact)).evaluate_from_prices(
+                tickers=["AAA0", "AAA1"],
+                price_df=prices,
+                weights=[0.5, 0.5],
+                horizon=5,
+            )
+
+        self.assertEqual(result.diagnostics.model_health, "degraded")
+        self.assertIn(CrisisWarningService.weak_roc_auc_warning, result.diagnostics.warnings)
+        self.assertIn(CrisisWarningService.weak_pr_auc_warning, result.diagnostics.warnings)
+        self.assertIn(
+            CrisisWarningService.elevated_calibration_error_warning,
+            result.diagnostics.warnings,
+        )
+
+    def test_service_without_calibration_keeps_raw_probability_path(self) -> None:
+        prices = self._prices_from_returns(self._tail_rich_returns(rows=140))
+        artifact = self._artifact(
+            probability=0.31,
+            metadata_overrides={
+                "validation_metrics": {
+                    "validation_positive_events": 20.0,
+                    "positive_rate": 0.05,
+                    "roc_auc": 0.72,
+                    "pr_auc": 0.18,
+                    "calibration_error": 0.02,
+                },
+            },
+        )
+
+        with patch.object(CrisisWarningEngine, "shap_values", return_value=(np.zeros(len(CrisisWarningEngine.feature_columns)), 0.05, False, [])):
+            result = CrisisWarningService(store=FakeStore(artifact)).evaluate_from_prices(
+                tickers=["AAA0", "AAA1"],
+                price_df=prices,
+                weights=[0.5, 0.5],
+                horizon=5,
+            )
+
+        self.assertAlmostEqual(result.crisis_probability, 0.31)
+        self.assertEqual(result.diagnostics.model_health, "ok")
+        self.assertFalse(result.diagnostics.probability_calibrated)
+        self.assertNotIn(
+            CrisisWarningService.calibration_bucket_warning,
+            result.diagnostics.warnings,
+        )
 
     def test_service_rejects_non_finite_latest_feature_row(self) -> None:
         prices = self._prices_from_returns(self._tail_rich_returns(rows=140))

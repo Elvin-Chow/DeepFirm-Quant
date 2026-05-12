@@ -154,6 +154,31 @@ export function localizeWarning(message: string, lang: Lang): string {
       "A股市值先验暂不可用，优化器已使用逆波动率均衡。",
       "A股市值先驗暫不可用，優化器已使用逆波動率均衡。",
     ],
+    "Probability calibration is compressed across a wide raw-score range; treat this reading as a baseline-calibrated signal.": [
+      "Probability calibration is compressed across a wide raw-score range; treat this as a baseline-calibrated signal.",
+      "概率校准在较宽的原始分数区间内被压平，本次读数应视为接近基准率的校准信号。",
+      "概率校準在較寬的原始分數區間內被壓平，本次讀數應視為接近基準率的校準訊號。",
+    ],
+    "Calibrated probability is close to the training tail-event base rate; treat this reading as a weak baseline signal.": [
+      "Calibrated probability is close to the training tail-event base rate; treat this as a weak baseline signal.",
+      "校准后的概率接近训练尾部事件基准率，本次读数应视为弱基准信号。",
+      "校準後的概率接近訓練尾部事件基準率，本次讀數應視為弱基準訊號。",
+    ],
+    "Crisis warning ROC AUC is weak; treat the probability as contextual.": [
+      "Crisis warning ROC AUC is weak; use the probability only as context.",
+      "危机预警 ROC AUC 偏弱，概率只能作为上下文参考。",
+      "危機預警 ROC AUC 偏弱，概率只能作為上下文參考。",
+    ],
+    "Crisis warning PR AUC is close to the validation base rate; treat the probability as contextual.": [
+      "Crisis warning PR AUC is close to the validation base rate; use the probability only as context.",
+      "危机预警 PR AUC 接近验证基准率，概率只能作为上下文参考。",
+      "危機預警 PR AUC 接近驗證基準率，概率只能作為上下文參考。",
+    ],
+    "Crisis warning raw probability calibration error is elevated.": [
+      "Crisis warning raw probability calibration error is elevated.",
+      "危机预警原始概率校准误差偏高。",
+      "危機預警原始概率校準誤差偏高。",
+    ],
   };
   const mapped = mappings[trimmed];
   if (mapped) return byLang(lang, mapped[0], mapped[1], mapped[2]);

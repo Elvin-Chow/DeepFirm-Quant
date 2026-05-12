@@ -4,6 +4,18 @@ All notable changes to the DeepFirm Quant project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [V3.5.1] - 2026-05-12
+
+### Backend
+- Strengthened crisis warning diagnostics so compressed isotonic calibration buckets, base-rate-like calibrated probabilities, weak ROC/PR validation metrics, and elevated calibration error degrade model health and surface clear warning messages.
+- Preserved the existing crisis warning probability contract, target definition, and offline artifacts while making low-information 5D readings easier to audit.
+- Updated FastAPI metadata to version `3.5.1`.
+
+### Frontend
+- Refined the Crisis Warning interpretation and model-audit layout so paired panels align cleanly while the interpretation panel shows probability, training base rate, calibration state, model health, and validation metrics.
+- Added localized English, Simplified Chinese, and Traditional Chinese copy for the new crisis warning calibration and validation diagnostics.
+- Updated frontend release notes and package metadata to version `3.5.1`.
+
 ## [V3.5.0] - 2026-05-11
 
 ### Backend

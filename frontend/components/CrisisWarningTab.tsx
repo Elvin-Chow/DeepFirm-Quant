@@ -441,6 +441,31 @@ function SignalTile({
   );
 }
 
+function ReadingMetric({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  icon: ElementType;
+  label: string;
+  value: string;
+  detail: string;
+  tone: Tone;
+}) {
+  return (
+    <div className="min-w-0 border-t border-black/[0.07] py-3 dark:border-white/[0.08]">
+      <div className="flex min-w-0 items-center gap-2">
+        <Icon size={14} className={`${toneText[tone]} shrink-0`} />
+        <div className="min-w-0 truncate text-[10px] font-semibold uppercase text-df-text-secondary">{label}</div>
+      </div>
+      <div className={`mt-1 truncate text-lg font-semibold ${toneText[tone]}`}>{value}</div>
+      <div className="mt-1 text-xs leading-snug text-df-text-secondary">{detail}</div>
+    </div>
+  );
+}
+
 function ProbabilitySummary({
   value,
   label,
@@ -648,6 +673,47 @@ export default function CrisisWarningTab({
   const hiddenReducerCount = Math.max(0, crisisWarning.risk_reducers.length - visibleReducers.length);
   const decisionFocus = decisionFocusText(crisisWarning, confidence, lang);
   const validationDetail = `ROC AUC ${formatNumber(metrics.roc_auc, 2)} · PR AUC ${formatNumber(metrics.pr_auc, 2)}`;
+  const calibrationLabel = crisisWarning.diagnostics.probability_calibrated ? t(lang, "calibrated") : t(lang, "rawProbability");
+  const readoutMetrics = [
+    {
+      icon: Activity,
+      label: t(lang, "crisisProbability"),
+      value: formatPercent(crisisWarning.crisis_probability),
+      detail: byLang(
+        lang,
+        `${crisisWarning.horizon}D estimated tail-event probability.`,
+        `${crisisWarning.horizon}D 尾部事件估计概率。`,
+        `${crisisWarning.horizon}D 尾部事件估計概率。`
+      ),
+      tone,
+    },
+    {
+      icon: BarChart3,
+      label: t(lang, "positiveRate"),
+      value: formatPercent(crisisWarning.diagnostics.positive_rate, 2),
+      detail: byLang(
+        lang,
+        "Training base rate for comparison.",
+        "用于对照的训练基准率。",
+        "用於對照的訓練基準率。"
+      ),
+      tone: "neutral" as Tone,
+    },
+    {
+      icon: Gauge,
+      label: t(lang, "probabilityCalibration"),
+      value: calibrationLabel,
+      detail: confidence.label,
+      tone: confidence.tone,
+    },
+    {
+      icon: ShieldCheck,
+      label: t(lang, "modelHealth"),
+      value: localizeModelHealth(crisisWarning.diagnostics.model_health, lang),
+      detail: validationDetail,
+      tone: crisisWarning.diagnostics.model_health === "ok" ? "good" as Tone : "warn" as Tone,
+    },
+  ];
 
   return (
     <div className="space-y-3">
@@ -814,11 +880,23 @@ export default function CrisisWarningTab({
         </div>
       </Panel>
 
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.08fr)_minmax(21rem,0.92fr)]">
-        <Panel>
+      <div className="grid items-stretch gap-3 xl:grid-cols-[minmax(0,1.08fr)_minmax(21rem,0.92fr)]">
+        <Panel className="h-full">
           <div className="p-4 sm:p-5 xl:p-6">
             <SectionTitle icon={Info} title={t(lang, "crisisHowToRead")} />
-            <div className="grid gap-4 lg:grid-cols-3">
+            <div className="grid gap-x-5 sm:grid-cols-2 xl:grid-cols-4">
+              {readoutMetrics.map((metric) => (
+                <ReadingMetric
+                  key={metric.label}
+                  icon={metric.icon}
+                  label={metric.label}
+                  value={metric.value}
+                  detail={metric.detail}
+                  tone={metric.tone}
+                />
+              ))}
+            </div>
+            <div className="mt-2 grid gap-4 lg:grid-cols-3">
               <ReadingPoint icon={Target} title={t(lang, "targetDefinition")} tone="accent">
                 <p>{localizedTargetDefinition}</p>
               </ReadingPoint>
@@ -839,7 +917,7 @@ export default function CrisisWarningTab({
           </div>
         </Panel>
 
-        <Panel>
+        <Panel className="h-full">
           <div className="p-4 sm:p-5 xl:p-6">
             <SectionTitle icon={ShieldCheck} title={byLang(lang, "Model audit", "模型审计", "模型審計")} />
             <div className="grid gap-4 sm:grid-cols-2">
