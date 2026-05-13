@@ -9,7 +9,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from backend.schemas import AlphaAnalysisRequest, AnalysisRunRequest, AnalysisRunResult, PortfolioOptimizeRequest
+from backend.schemas import (
+    AlphaAnalysisRequest,
+    AnalysisRunRequest,
+    AnalysisRunResult,
+    MarketSnapshotResult,
+    PortfolioOptimizeRequest,
+    RiskReportRequest,
+    RiskReportResult,
+)
+from backend.market_snapshot import build_market_snapshot
 from backend.services import PortfolioAnalysisService
 from data_pipeline import AlignmentError, DataFetcherError, SmartFetcher
 from models import (
@@ -45,7 +54,7 @@ crisis_warning_service = analysis_service.crisis_warning_service
 app = FastAPI(
     title="DeepFirm Quant",
     description="Industrial-grade quant risk and decision engine",
-    version="3.5.1",
+    version="3.6.0",
 )
 
 origins_env = os.getenv("ALLOW_ORIGINS")
@@ -70,6 +79,18 @@ app.add_middleware(
 async def health_check() -> dict[str, str]:
     """Health probe endpoint."""
     return {"status": "ok"}
+
+
+@app.get("/api/v1/market/snapshot", response_model=MarketSnapshotResult)
+async def get_market_snapshot(market: str = "us", force_refresh: bool = False) -> MarketSnapshotResult:
+    """Return a compact market status and index snapshot for the landing page."""
+    if market not in {"us", "hk", "cn", "mixed"}:
+        raise HTTPException(status_code=400, detail=f"unsupported market: {market}")
+
+    fetcher = _make_fetcher(api_key=None, allow_sandbox_data=False)
+    if force_refresh:
+        fetcher.disable_cache()
+    return build_market_snapshot(market, fetcher, force_refresh=force_refresh)
 
 
 def _make_fetcher(api_key: Optional[str], allow_sandbox_data: bool) -> SmartFetcher:
@@ -214,6 +235,21 @@ async def run_analysis(payload: AnalysisRunRequest) -> AnalysisRunResult:
         raise
     except Exception as exc:
         logger.exception("analysis run crashed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/risk/report", response_model=RiskReportResult)
+async def generate_risk_report(payload: RiskReportRequest) -> RiskReportResult:
+    """Generate a structured risk report from the full analysis workflow."""
+    try:
+        return await analysis_service.generate_risk_report(payload)
+    except (DataFetcherError, AlignmentError, ValueError) as exc:
+        logger.warning("risk report generation failed error=%s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("risk report generation crashed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

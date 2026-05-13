@@ -1,7 +1,21 @@
 "use client";
 
-import { Sparkles, BookOpen } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  BookOpen,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  RefreshCw,
+  Sparkles,
+  Wifi,
+} from "lucide-react";
+import { getApi } from "@/hooks/useApi";
 import { t, Lang } from "@/lib/i18n";
+import { MarketMode, MarketSnapshotIndex, MarketSnapshotResult, MarketSessionStatus } from "@/types/api";
 
 interface ChangelogEntry {
   version: string;
@@ -16,6 +30,60 @@ const changelogTypeOrder: Record<ChangelogEntry["items"][number]["type"], number
 };
 
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "V3.6.0",
+    date: "2026-05-13",
+    items: [
+      {
+        type: "added",
+        text: {
+          en: "Backend adds a market snapshot API for US, HK, CN, and mixed-market landing views, including session state, primary index levels, changes, timestamps, and source metadata.",
+          zh: "后端新增市场快照 API，支持美股、港股、A 股与混合市场首页视图，返回交易状态、主要指数点位、涨跌、时间戳与数据来源。",
+          tc: "後端新增市場快照 API，支援美股、港股、A 股與混合市場首頁視圖，返回交易狀態、主要指數點位、漲跌、時間戳與資料來源。",
+        },
+      },
+      {
+        type: "added",
+        text: {
+          en: "Backend adds a structured risk report API combining traditional risk, ML forecast, anomaly, regime, crisis warning, Decision/OOS summary, methodology notes, data warnings, and disclaimers.",
+          zh: "后端新增结构化风险报告 API，整合传统风险、机器学习预测、异常检测、市场状态、危机预警、决策/样本外摘要、方法说明、数据提示与免责声明。",
+          tc: "後端新增結構化風險報告 API，整合傳統風險、機器學習預測、異常偵測、市場狀態、危機預警、決策/樣本外摘要、方法說明、資料提示與免責聲明。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "The Welcome page now uses a compact market dashboard with the welcome banner restored, live status, a short daily brief, and denser primary-index instrument cards.",
+          zh: "欢迎页改为更紧凑的市场仪表盘，恢复欢迎语，并展示实时市场状态、今日简析和更密集的主要指数仪表卡。",
+          tc: "歡迎頁改為更緊湊的市場儀表盤，恢復歡迎語，並展示即時市場狀態、今日簡析和更密集的主要指數儀表卡。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "Changelog history now stays available through collapsible version groups instead of dominating the landing page.",
+          zh: "更新日志历史现在通过版本折叠组保留，不再占据首页主要视觉空间。",
+          tc: "更新日誌歷史現在透過版本摺疊組保留，不再佔據首頁主要視覺空間。",
+        },
+      },
+      {
+        type: "added",
+        text: {
+          en: "Frontend adds a Report tab for generating, refreshing, and printing structured risk reports from the current portfolio inputs.",
+          zh: "前端新增报告页，可基于当前组合参数生成、刷新并打印结构化风险报告。",
+          tc: "前端新增報告頁，可基於目前組合參數生成、刷新並列印結構化風險報告。",
+        },
+      },
+      {
+        type: "fixed",
+        text: {
+          en: "HK landing-page index snapshots now recover Hang Seng TECH change values from chart metadata when provider close rows are incomplete.",
+          zh: "港股首页指数快照现在会在供应商收盘序列不完整时，从图表元数据恢复恒生科技指数涨跌数据。",
+          tc: "港股首頁指數快照現在會在供應商收盤序列不完整時，從圖表元資料恢復恆生科技指數漲跌資料。",
+        },
+      },
+    ],
+  },
   {
     version: "V3.5.1",
     date: "2026-05-12",
@@ -519,52 +587,751 @@ function Badge({ type, lang }: { type: ChangelogEntry["items"][0]["type"]; lang:
   );
 }
 
-export default function WelcomeTab({ lang }: { lang: Lang }) {
+const MARKET_PANEL_COPY = {
+  en: {
+    marketStatus: "Market Status",
+    dailyBrief: "Today's Market Brief",
+    majorIndices: "Major Indices",
+    recentUpdates: "Recent Updates",
+    refresh: "Refresh market snapshot",
+    price: "Level",
+    change: "Change",
+    changePct: "Change %",
+    date: "Date",
+    unavailable: "Market data is temporarily unavailable.",
+    updated: "Updated",
+    dataSource: "Source",
+    dataDelayNote: "Market data may be delayed or adjusted by the data provider.",
+    localTime: "Local time",
+    asOf: "As of",
+    sessionOpen: "Open",
+    sessionLunch: "Lunch Break",
+    sessionClosed: "Closed",
+    sessionUnknown: "Unknown",
+    sessionHintOpen: "Session is active; index changes should be read as live or delayed market tone.",
+    sessionHintLunch: "Market is in the midday break; moves reflect the latest traded level before the pause.",
+    sessionHintClosed: "Market is closed; moves reflect the latest available close or delayed provider update.",
+    noBrief: "The system cannot form a reliable brief until at least one index returns usable prices.",
+  },
+  zh: {
+    marketStatus: "市场状态",
+    dailyBrief: "今日大盘简析",
+    majorIndices: "主要指数",
+    recentUpdates: "最近更新",
+    refresh: "刷新市场快照",
+    price: "点位",
+    change: "涨跌",
+    changePct: "涨跌幅",
+    date: "日期",
+    unavailable: "市场数据暂时不可用。",
+    updated: "更新时间",
+    dataSource: "数据来源",
+    dataDelayNote: "市场数据可能存在延迟，具体以数据源返回为准。",
+    localTime: "当地时间",
+    asOf: "截至",
+    sessionOpen: "交易中",
+    sessionLunch: "午间休市",
+    sessionClosed: "已收市",
+    sessionUnknown: "未知",
+    sessionHintOpen: "当前处于交易时段，指数变化可视作实时或延迟的盘面温度。",
+    sessionHintLunch: "当前处于午间休市，涨跌反映暂停前的最新交易水平。",
+    sessionHintClosed: "当前市场已收市，涨跌反映最新可用收盘或延迟行情。",
+    noBrief: "至少需要一个指数返回有效价格后，系统才能生成可靠简析。",
+  },
+  tc: {
+    marketStatus: "市場狀態",
+    dailyBrief: "今日大盤簡析",
+    majorIndices: "主要指數",
+    recentUpdates: "最近更新",
+    refresh: "刷新市場快照",
+    price: "點位",
+    change: "漲跌",
+    changePct: "漲跌幅",
+    date: "日期",
+    unavailable: "市場資料暫時不可用。",
+    updated: "更新時間",
+    dataSource: "資料來源",
+    dataDelayNote: "市場資料可能存在延遲，具體以資料源返回為準。",
+    localTime: "當地時間",
+    asOf: "截至",
+    sessionOpen: "交易中",
+    sessionLunch: "午間休市",
+    sessionClosed: "已收市",
+    sessionUnknown: "未知",
+    sessionHintOpen: "目前處於交易時段，指數變化可視作即時或延遲的盤面溫度。",
+    sessionHintLunch: "目前處於午間休市，漲跌反映暫停前的最新交易水平。",
+    sessionHintClosed: "目前市場已收市，漲跌反映最新可用收盤或延遲行情。",
+    noBrief: "至少需要一個指數返回有效價格後，系統才能生成可靠簡析。",
+  },
+} as const;
+
+const MARKET_LABELS: Record<MarketMode, Record<Lang, string>> = {
+  us: { en: "US Market", zh: "美股市场", tc: "美股市場" },
+  hk: { en: "HK Market", zh: "港股市场", tc: "港股市場" },
+  cn: { en: "China A-Share Market", zh: "A 股市场", tc: "A 股市場" },
+  mixed: { en: "Mixed Market", zh: "混合市场", tc: "混合市場" },
+};
+
+type MarketPanelCopyKey = keyof typeof MARKET_PANEL_COPY.en;
+
+function panelText(lang: Lang, key: MarketPanelCopyKey): string {
+  return MARKET_PANEL_COPY[lang][key] || MARKET_PANEL_COPY.en[key];
+}
+
+function localeForLang(lang: Lang): string {
+  if (lang === "en") {
+    return "en-US";
+  }
+  return lang === "tc" ? "zh-HK" : "zh-CN";
+}
+
+function getIndexName(index: MarketSnapshotIndex, lang: Lang): string {
+  if (lang === "zh") {
+    return index.name_zh;
+  }
+  if (lang === "tc") {
+    return index.name_tc;
+  }
+  return index.name;
+}
+
+function formatNumber(value: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "--";
+  }
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatSignedNumber(value: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "--";
+  }
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${value.toFixed(2)}`;
+}
+
+function formatPercent(value: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "--";
+  }
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${value.toFixed(2)}%`;
+}
+
+function formatDateTime(value: string | null | undefined, lang: Lang, includeSeconds = false): string {
+  if (!value) {
+    return "--";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(localeForLang(lang), {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(includeSeconds ? { second: "2-digit" as const } : {}),
+  }).format(parsed);
+}
+
+function formatLocalTime(value: string | null | undefined, lang: Lang): string {
+  if (!value) {
+    return "--";
+  }
+  if (value.includes(" / ")) {
+    return value;
+  }
+  return formatDateTime(value, lang);
+}
+
+function formatSourceLabel(value: string | null | undefined, lang: Lang): string {
+  if (!value) {
+    return "--";
+  }
+  if (value === "mixed providers") {
+    if (lang === "zh") {
+      return "混合数据源";
+    }
+    if (lang === "tc") {
+      return "混合資料源";
+    }
+    return "Mixed providers";
+  }
+  return value;
+}
+
+function sessionLabel(status: MarketSessionStatus, lang: Lang): string {
+  if (status === "open") {
+    return panelText(lang, "sessionOpen");
+  }
+  if (status === "lunch_break") {
+    return panelText(lang, "sessionLunch");
+  }
+  if (status === "closed") {
+    return panelText(lang, "sessionClosed");
+  }
+  return panelText(lang, "sessionUnknown");
+}
+
+function sessionHint(status: MarketSessionStatus, lang: Lang): string {
+  if (status === "open") {
+    return panelText(lang, "sessionHintOpen");
+  }
+  if (status === "lunch_break") {
+    return panelText(lang, "sessionHintLunch");
+  }
+  return panelText(lang, "sessionHintClosed");
+}
+
+function sessionStyle(status: MarketSessionStatus): string {
+  if (status === "open") {
+    return "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300";
+  }
+  if (status === "lunch_break") {
+    return "border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-300";
+  }
+  if (status === "closed") {
+    return "border-stone-500/20 bg-stone-500/10 text-stone-600 dark:text-stone-300";
+  }
+  return "border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-300";
+}
+
+function changeStyle(value: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "text-df-text-secondary";
+  }
+  if (value > 0) {
+    return "text-emerald-600 dark:text-emerald-300";
+  }
+  if (value < 0) {
+    return "text-rose-600 dark:text-rose-300";
+  }
+  return "text-df-text-secondary";
+}
+
+function buildMarketBrief(snapshot: MarketSnapshotResult | null, lang: Lang): string[] {
+  if (!snapshot) {
+    return [panelText(lang, "noBrief")];
+  }
+
+  const available = snapshot.indices.filter(
+    (index) => index.status === "ok" && typeof index.change_percent === "number",
+  );
+  if (available.length === 0) {
+    return [panelText(lang, "noBrief")];
+  }
+
+  const changes = available.map((index) => index.change_percent ?? 0);
+  const averageChange = changes.reduce((sum, value) => sum + value, 0) / changes.length;
+  const spread = Math.max(...changes) - Math.min(...changes);
+  let strongest = available[0];
+  for (const index of available.slice(1)) {
+    if (Math.abs(index.change_percent ?? 0) > Math.abs(strongest.change_percent ?? 0)) {
+      strongest = index;
+    }
+  }
+
+  const strongestName = getIndexName(strongest, lang);
+  const strongestMove = formatPercent(strongest.change_percent);
+  const marketName = MARKET_LABELS[snapshot.market][lang];
+
+  if (lang === "zh") {
+    const direction =
+      averageChange >= 0.8
+        ? `${marketName}今日风险偏好偏强，主要指数平均涨幅约 ${formatPercent(averageChange)}。`
+        : averageChange <= -0.8
+          ? `${marketName}今日承压，主要指数平均跌幅约 ${formatPercent(averageChange)}。`
+          : `${marketName}整体维持震荡，主要指数平均变化约 ${formatPercent(averageChange)}。`;
+    const breadth =
+      spread >= 1.5
+        ? `板块分化较明显，${strongestName}波动最突出，当前变化 ${strongestMove}。`
+        : `指数联动性较高，盘面没有出现特别极端的结构性分化。`;
+    return [direction, breadth, sessionHint(snapshot.session_status, lang)];
+  }
+
+  if (lang === "tc") {
+    const direction =
+      averageChange >= 0.8
+        ? `${marketName}今日風險偏好偏強，主要指數平均漲幅約 ${formatPercent(averageChange)}。`
+        : averageChange <= -0.8
+          ? `${marketName}今日承壓，主要指數平均跌幅約 ${formatPercent(averageChange)}。`
+          : `${marketName}整體維持震盪，主要指數平均變化約 ${formatPercent(averageChange)}。`;
+    const breadth =
+      spread >= 1.5
+        ? `板塊分化較明顯，${strongestName}波動最突出，目前變化 ${strongestMove}。`
+        : `指數聯動性較高，盤面沒有出現特別極端的結構性分化。`;
+    return [direction, breadth, sessionHint(snapshot.session_status, lang)];
+  }
+
+  const direction =
+    averageChange >= 0.8
+      ? `${marketName} risk appetite is firm today, with the major indices averaging ${formatPercent(averageChange)}.`
+      : averageChange <= -0.8
+        ? `${marketName} is under pressure today, with the major indices averaging ${formatPercent(averageChange)}.`
+        : `${marketName} is range-bound, with the major indices averaging ${formatPercent(averageChange)}.`;
+  const breadth =
+    spread >= 1.5
+      ? `Breadth is uneven; ${strongestName} is the main mover at ${strongestMove}.`
+      : "Index breadth is aligned, with no extreme divergence across the tracked benchmarks.";
+  return [direction, breadth, sessionHint(snapshot.session_status, lang)];
+}
+
+function LoadingIndexCard() {
   return (
-    <div className="space-y-6 page-fade-in">
-      {/* Hero card */}
-      <div className="glass-card p-5 text-center sm:p-8">
-        <Sparkles size={32} className="mx-auto text-df-accent mb-4" />
-        <h2 className="mb-2 text-2xl font-serif font-bold gradient-text bg-gradient-to-r from-df-accent to-df-accent-secondary sm:text-3xl">
-          {t(lang, "welcomeTitle")}
-        </h2>
-        <p className="text-sm text-df-text-secondary max-w-lg mx-auto leading-relaxed">
-          {t(lang, "welcomeSubtitle")}
-        </p>
+    <div className="rounded-xl border border-df-border/60 bg-df-surface-solid/15 p-4">
+      <div className="h-4 w-28 rounded-full bg-df-surface-solid/40" />
+      <div className="mt-4 h-7 w-36 rounded-full bg-df-surface-solid/30" />
+      <div className="mt-4 h-2 w-full rounded-full bg-df-surface-solid/30" />
+    </div>
+  );
+}
+
+function IndexTile({ index, lang }: { index: MarketSnapshotIndex; lang: Lang }) {
+  const positive = typeof index.change_percent === "number" && index.change_percent > 0;
+  const negative = typeof index.change_percent === "number" && index.change_percent < 0;
+  const hasChange = typeof index.change_percent === "number" && Number.isFinite(index.change_percent);
+  const statusLabel = hasChange ? (positive ? "UP" : negative ? "DOWN" : "FLAT") : "--";
+  const moveMagnitude = hasChange ? Math.min(Math.abs(index.change_percent ?? 0) * 40, 100) : 0;
+  const barColor = positive ? "bg-emerald-500" : negative ? "bg-rose-500" : "bg-df-text-secondary";
+  const priceColor = hasChange ? changeStyle(index.change_percent) : "text-df-text";
+
+  return (
+    <article className="rounded-xl border border-df-border/60 bg-df-surface-solid/15 p-4 shadow-[0_14px_36px_-32px_rgba(41,37,36,0.45)]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${barColor}`} />
+            <h4 className="truncate text-sm font-bold text-df-text">{getIndexName(index, lang)}</h4>
+          </div>
+          <p className="mt-0.5 text-xs font-medium text-df-text-secondary">{index.symbol}</p>
+        </div>
+        {index.status === "ok" && (
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${changeStyle(index.change_percent)}`}>
+            {statusLabel}
+          </span>
+        )}
       </div>
 
-      {/* Changelog */}
-      <div className="glass-card p-4 sm:p-6">
-        <div className="flex items-center gap-2 mb-5">
-          <BookOpen size={18} className="text-df-accent" />
-          <h3 className="text-sm font-bold uppercase tracking-wider text-df-text-secondary">
-            {t(lang, "changelog")}
-          </h3>
+      {index.status !== "ok" ? (
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-df-danger/20 bg-df-danger/10 px-3 py-2 text-xs text-df-text-secondary">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-df-danger" />
+          <span className="line-clamp-2">{index.warning || panelText(lang, "unavailable")}</span>
         </div>
-
-        <div className="space-y-6">
-          {CHANGELOG.map((entry) => (
-            <div key={entry.version}>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-df-accent/10 text-df-accent">
-                  {entry.version.startsWith("V") ? entry.version : `v${entry.version}`}
-                </span>
-                <span className="text-xs text-df-text-secondary">{entry.date}</span>
+      ) : (
+        <>
+          <div className={`mt-4 font-mono text-2xl font-bold tracking-normal ${priceColor}`}>
+            {formatNumber(index.price)}
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="rounded-lg border border-df-border/50 bg-df-surface-solid/15 px-2.5 py-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-df-text-secondary">
+                {panelText(lang, "change")}
               </div>
-              <ul className="space-y-2">
-                {[...entry.items]
-                  .sort((a, b) => changelogTypeOrder[a.type] - changelogTypeOrder[b.type])
-                  .map((item, idx) => (
-                    <li key={idx} className="flex flex-col items-start gap-1.5 sm:flex-row sm:gap-2">
-                      <Badge type={item.type} lang={lang} />
-                      <span className="text-sm text-df-text leading-relaxed">{item.text[lang]}</span>
-                    </li>
-                  ))}
-              </ul>
+              <div className={`mt-1 font-mono text-sm font-bold ${changeStyle(index.change)}`}>
+                {formatSignedNumber(index.change)}
+              </div>
             </div>
-          ))}
+            <div className="rounded-lg border border-df-border/50 bg-df-surface-solid/15 px-2.5 py-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-df-text-secondary">
+                {panelText(lang, "changePct")}
+              </div>
+              <div className={`mt-1 font-mono text-sm font-bold ${changeStyle(index.change_percent)}`}>
+                {formatPercent(index.change_percent)}
+              </div>
+            </div>
+          </div>
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-df-surface-solid/35">
+            <div
+              className={`h-full rounded-full ${barColor}`}
+              style={{ width: `${Math.max(moveMagnitude, hasChange ? 8 : 0)}%` }}
+            />
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-df-text-secondary">
+            <span>{index.asof_date || "--"}</span>
+            <span className="truncate text-right" title={index.source_detail}>
+              {formatSourceLabel(index.source_detail || index.source, lang)}
+            </span>
+          </div>
+        </>
+      )}
+    </article>
+  );
+}
+
+function summarizeIndices(snapshot: MarketSnapshotResult | null) {
+  const available = snapshot?.indices.filter(
+    (index) => index.status === "ok" && typeof index.change_percent === "number",
+  ) ?? [];
+  if (!available.length) {
+    return { average: null as number | null, up: 0, down: 0, flat: 0 };
+  }
+  const changes = available.map((index) => index.change_percent ?? 0);
+  const average = changes.reduce((sum, value) => sum + value, 0) / changes.length;
+  return {
+    average,
+    up: changes.filter((value) => value > 0).length,
+    down: changes.filter((value) => value < 0).length,
+    flat: changes.filter((value) => value === 0).length,
+  };
+}
+
+interface WelcomeTabProps {
+  lang: Lang;
+  market: MarketMode;
+  snapshotsReady: boolean;
+  shouldAutoRefresh: boolean;
+  cachedSnapshot: MarketSnapshotResult | null;
+  onSnapshotChange: (snapshot: MarketSnapshotResult) => void;
+  onAutoRefreshComplete: (market: MarketMode) => void;
+}
+
+export default function WelcomeTab({
+  lang,
+  market,
+  snapshotsReady,
+  shouldAutoRefresh,
+  cachedSnapshot,
+  onSnapshotChange,
+  onAutoRefreshComplete,
+}: WelcomeTabProps) {
+  const cachedSnapshotForMarket = cachedSnapshot?.market === market ? cachedSnapshot : null;
+  const [snapshot, setSnapshot] = useState<MarketSnapshotResult | null>(cachedSnapshotForMarket);
+  const [loading, setLoading] = useState(!cachedSnapshotForMarket);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const snapshotRequestIdRef = useRef(0);
+  const [expandedVersions, setExpandedVersions] = useState<Set<string>>(
+    () => new Set(CHANGELOG[0]?.version ? [CHANGELOG[0].version] : []),
+  );
+
+  const loadSnapshot = useCallback(
+    async (signal?: AbortSignal, showLoader = false, forceRefresh = false) => {
+      const requestId = snapshotRequestIdRef.current + 1;
+      snapshotRequestIdRef.current = requestId;
+      if (showLoader) {
+        setLoading(true);
+      }
+      try {
+        const refreshQuery = forceRefresh ? `&force_refresh=true&_ts=${Date.now()}` : "";
+        const nextSnapshot = await getApi<MarketSnapshotResult>(
+          `/api/v1/market/snapshot?market=${encodeURIComponent(market)}${refreshQuery}`,
+          signal,
+        );
+        if (signal?.aborted || requestId !== snapshotRequestIdRef.current) {
+          return;
+        }
+        setSnapshot(nextSnapshot);
+        onSnapshotChange(nextSnapshot);
+        setError(null);
+      } catch (err) {
+        if (
+          signal?.aborted ||
+          requestId !== snapshotRequestIdRef.current ||
+          (err instanceof DOMException && err.name === "AbortError")
+        ) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : panelText(lang, "unavailable"));
+      } finally {
+        if (showLoader && !signal?.aborted && requestId === snapshotRequestIdRef.current) {
+          setLoading(false);
+        }
+      }
+    },
+    [lang, market, onSnapshotChange],
+  );
+
+  const handleRefresh = useCallback(async () => {
+    if (loading || refreshing) {
+      return;
+    }
+
+    setRefreshing(true);
+    const startedAt = Date.now();
+    try {
+      await loadSnapshot(undefined, false, true);
+    } finally {
+      const remainingMs = Math.max(0, 600 - (Date.now() - startedAt));
+      window.setTimeout(() => {
+        setRefreshing(false);
+      }, remainingMs);
+    }
+  }, [loadSnapshot, loading, refreshing]);
+
+  useEffect(() => {
+    if (!snapshotsReady) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setSnapshot(cachedSnapshotForMarket);
+    setError(null);
+    if (shouldAutoRefresh) {
+      void loadSnapshot(controller.signal, !cachedSnapshotForMarket, true).finally(() => {
+        if (!controller.signal.aborted) {
+          onAutoRefreshComplete(market);
+        }
+      });
+    } else if (cachedSnapshotForMarket) {
+      setLoading(false);
+    } else {
+      void loadSnapshot(controller.signal, true, true);
+    }
+    const refreshId = window.setInterval(() => {
+      void loadSnapshot(undefined, false, true);
+    }, 60_000);
+
+    return () => {
+      controller.abort();
+      window.clearInterval(refreshId);
+    };
+  }, [
+    loadSnapshot,
+    market,
+    onAutoRefreshComplete,
+    shouldAutoRefresh,
+    snapshotsReady,
+  ]);
+
+  const brief = useMemo(() => buildMarketBrief(snapshot, lang), [snapshot, lang]);
+  const summary = useMemo(() => summarizeIndices(snapshot), [snapshot]);
+  const toggleVersion = useCallback((version: string) => {
+    setExpandedVersions((current) => {
+      const next = new Set(current);
+      if (next.has(version)) {
+        next.delete(version);
+      } else {
+        next.add(version);
+      }
+      return next;
+    });
+  }, []);
+
+  return (
+    <div className="space-y-4 page-fade-in">
+      <section className="glass-card p-4 sm:p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-df-border bg-df-surface-solid/30 text-df-accent">
+              <Sparkles size={20} />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-xl font-serif font-bold gradient-text bg-gradient-to-r from-df-accent to-df-accent-secondary sm:text-2xl">
+                {t(lang, "welcomeTitle")}
+              </h2>
+              <p className="mt-0.5 max-w-2xl text-sm leading-relaxed text-df-text-secondary">
+                {t(lang, "welcomeSubtitle")}
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="rounded-full border border-df-border bg-df-surface-solid/25 px-3 py-1.5 text-xs font-bold text-df-text-secondary">
+              {MARKET_LABELS[market][lang]}
+            </span>
+            <span
+              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-bold ${sessionStyle(
+                snapshot?.session_status ?? "unknown",
+              )}`}
+            >
+              {sessionLabel(snapshot?.session_status ?? "unknown", lang)}
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleRefresh()}
+              disabled={loading || refreshing}
+              title={panelText(lang, "refresh")}
+              aria-label={panelText(lang, "refresh")}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-df-border bg-df-surface/80 text-df-text-secondary transition-colors hover:text-df-accent disabled:cursor-not-allowed disabled:opacity-60 click-press"
+            >
+              <RefreshCw size={16} className={loading || refreshing ? "animate-spin" : ""} />
+            </button>
+          </div>
         </div>
-      </div>
+      </section>
+
+      <section className="glass-card overflow-hidden">
+        <div className="border-b border-df-border/60 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Activity size={17} className="text-df-accent" />
+              <h3 className="text-sm font-bold uppercase tracking-wider text-df-text-secondary">
+                {panelText(lang, "marketStatus")}
+              </h3>
+            </div>
+            <div className={`text-sm font-bold ${changeStyle(summary.average)}`}>
+              {formatPercent(summary.average)}
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="min-w-0 rounded-lg border border-df-border/60 bg-df-surface-solid/20 px-3 py-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-df-text-secondary">
+                <Clock3 size={13} />
+                {panelText(lang, "localTime")}
+              </div>
+              <p className="mt-1 truncate text-sm font-bold text-df-text" title={snapshot?.local_time || ""}>
+                {formatLocalTime(snapshot?.local_time, lang)}
+              </p>
+            </div>
+            <div className="min-w-0 rounded-lg border border-df-border/60 bg-df-surface-solid/20 px-3 py-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-df-text-secondary">
+                <RefreshCw size={13} />
+                {panelText(lang, "updated")}
+              </div>
+              <p className="mt-1 truncate text-sm font-bold text-df-text">
+                {formatDateTime(snapshot?.updated_at, lang, true)}
+              </p>
+            </div>
+            <div className="min-w-0 rounded-lg border border-df-border/60 bg-df-surface-solid/20 px-3 py-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-df-text-secondary">
+                <Wifi size={13} />
+                {panelText(lang, "dataSource")}
+              </div>
+              <p className="mt-1 truncate text-sm font-bold text-df-text" title={snapshot?.source_detail || ""}>
+                {formatSourceLabel(snapshot?.source_detail || snapshot?.source, lang)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-df-border/60 bg-df-surface-solid/20 px-3 py-2">
+              <div className="text-[11px] font-semibold text-df-text-secondary">
+                {lang === "en" ? "Breadth" : lang === "tc" ? "漲跌分佈" : "涨跌分布"}
+              </div>
+              <p className="mt-1 text-sm font-bold text-df-text">
+                <span className="text-emerald-600 dark:text-emerald-300">{summary.up}</span>
+                <span className="mx-1 text-df-text-secondary">/</span>
+                <span className="text-rose-600 dark:text-rose-300">{summary.down}</span>
+                <span className="mx-1 text-df-text-secondary">/</span>
+                <span>{summary.flat}</span>
+              </p>
+            </div>
+            <div className="rounded-lg border border-df-border/60 bg-df-surface-solid/20 px-3 py-2">
+              <div className="text-[11px] font-semibold text-df-text-secondary">
+                {lang === "en" ? "Average Move" : lang === "tc" ? "平均變化" : "平均变化"}
+              </div>
+              <p className={`mt-1 text-sm font-bold ${changeStyle(summary.average)}`}>
+                {formatPercent(summary.average)}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/15 bg-amber-500/10 px-3 py-2 text-xs font-medium text-df-text-secondary">
+            <AlertTriangle size={14} className="shrink-0 text-amber-500" />
+            <span>{panelText(lang, "dataDelayNote")}</span>
+          </div>
+
+          <div className="mt-3 rounded-lg border border-df-border/50 bg-df-surface-solid/15 px-3 py-2.5">
+            <div className="mb-1.5 flex items-center gap-2">
+              <Activity size={15} className="text-df-accent" />
+              <span className="text-xs font-bold uppercase tracking-wider text-df-text-secondary">
+                {panelText(lang, "dailyBrief")}
+              </span>
+            </div>
+            <div className="grid gap-2 text-sm leading-relaxed text-df-text lg:grid-cols-3">
+              {brief.map((item, index) => (
+                <p key={`${item}-${index}`}>{item}</p>
+              ))}
+            </div>
+          </div>
+
+          {error && (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-df-danger/20 bg-df-danger/10 p-3 text-xs leading-relaxed text-df-text-secondary">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0 text-df-danger" />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-df-border/60">
+          <div className="flex items-center gap-2 px-4 py-3">
+            <BarChart3 size={18} className="text-df-accent" />
+            <h3 className="text-sm font-bold uppercase tracking-wider text-df-text-secondary">
+              {panelText(lang, "majorIndices")}
+            </h3>
+          </div>
+          <div className="grid gap-3 p-4 lg:grid-cols-3">
+            {!snapshot && loading
+              ? Array.from({ length: market === "mixed" ? 4 : 3 }).map((_, index) => (
+                  <LoadingIndexCard key={index} />
+                ))
+              : snapshot?.indices.length
+                ? snapshot.indices.map((index) => (
+                  <IndexTile key={index.symbol} index={index} lang={lang} />
+                ))
+                : (
+                  <div className="rounded-xl border border-df-border/60 bg-df-surface-solid/15 p-4 text-sm text-df-text-secondary lg:col-span-3">
+                    {panelText(lang, "unavailable")}
+                  </div>
+                )}
+          </div>
+        </div>
+      </section>
+
+      {snapshot?.data_warnings?.length ? (
+        <div className="glass-card p-4">
+          <div className="flex items-start gap-2 text-sm leading-relaxed text-df-text-secondary">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-500" />
+            <span>{snapshot.data_warnings[0]}</span>
+          </div>
+        </div>
+      ) : null}
+
+      <section className="glass-card p-4 sm:p-5">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <BookOpen size={18} className="text-df-accent" />
+            <h3 className="text-sm font-bold uppercase tracking-wider text-df-text-secondary">
+              {t(lang, "changelog")}
+            </h3>
+          </div>
+        </div>
+
+        <div className="divide-y divide-df-border/60">
+          {CHANGELOG.map((entry) => {
+            const expanded = expandedVersions.has(entry.version);
+            return (
+              <div key={entry.version} className="py-3 first:pt-2 last:pb-0">
+                <button
+                  type="button"
+                  onClick={() => toggleVersion(entry.version)}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg px-1 py-1 text-left transition-colors hover:bg-df-surface-solid/20"
+                  aria-expanded={expanded}
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    {expanded ? (
+                      <ChevronDown size={16} className="shrink-0 text-df-text-secondary" />
+                    ) : (
+                      <ChevronRight size={16} className="shrink-0 text-df-text-secondary" />
+                    )}
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-df-accent/10 text-df-accent">
+                      {entry.version.startsWith("V") ? entry.version : `v${entry.version}`}
+                    </span>
+                    <span className="text-xs text-df-text-secondary">{entry.date}</span>
+                  </div>
+                  <span className="shrink-0 text-xs text-df-text-secondary">
+                    {entry.items.length}
+                  </span>
+                </button>
+
+                {expanded && (
+                  <ul className="mt-2 space-y-2 pl-7">
+                    {[...entry.items]
+                      .sort((a, b) => changelogTypeOrder[a.type] - changelogTypeOrder[b.type])
+                      .map((item, idx) => (
+                        <li key={idx} className="flex flex-col items-start gap-1.5 sm:flex-row sm:gap-2">
+                          <Badge type={item.type} lang={lang} />
+                          <span className="text-sm leading-relaxed text-df-text">{item.text[lang]}</span>
+                        </li>
+                      ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }

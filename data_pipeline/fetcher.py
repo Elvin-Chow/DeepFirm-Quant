@@ -99,6 +99,7 @@ class SmartFetcher:
             "yes",
             "on",
         }
+        self._bypass_cache_reads = False
         self._result_cache_dir: Optional[str] = None
         self._session: requests.Session = requests.Session()
 
@@ -127,6 +128,11 @@ class SmartFetcher:
             "shrzgm": "macro_china_shrzgm",
             "cpi": "macro_china_cpi",
         }
+
+    def disable_cache(self) -> None:
+        """Bypass cache reads and cached HTTP responses for this request."""
+        self._bypass_cache_reads = True
+        self._session = requests.Session()
 
     def _result_cache_path(
         self,
@@ -256,7 +262,7 @@ class SmartFetcher:
         allow_partial: bool = False,
     ) -> Optional[Tuple[pd.DataFrame, bool, str]]:
         """Read symbol-level or legacy exact-window cache data."""
-        if not self.cache_enabled or self._result_cache_dir is None:
+        if self._bypass_cache_reads or not self.cache_enabled or self._result_cache_dir is None:
             return None
 
         paths = [

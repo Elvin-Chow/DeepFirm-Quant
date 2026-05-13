@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { Activity, BarChart3, Shield, TrendingUp, Scale, Sparkles, Menu } from "lucide-react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { Activity, BarChart3, Shield, TrendingUp, Scale, Sparkles, Menu, FileText } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import RiskTab from "@/components/RiskTab";
 import AlphaTab from "@/components/AlphaTab";
 import DecisionTab from "@/components/DecisionTab";
 import MachineLearningTab from "@/components/MachineLearningTab";
 import CrisisWarningTab from "@/components/CrisisWarningTab";
+import ReportTab from "@/components/ReportTab";
 import WelcomeTab from "@/components/WelcomeTab";
 import { postApi } from "@/hooks/useApi";
 import { useLanguage } from "@/hooks/useLanguage";
@@ -23,15 +24,19 @@ import {
   OptimizationResult,
   AnalysisRunRequest,
   AnalysisRunResult,
+  RiskReportRequest,
+  RiskReportResult,
   MarketMode,
+  MarketSnapshotResult,
 } from "@/types/api";
 import { t, type Lang } from "@/lib/i18n";
 import { getCurrencySymbol } from "@/lib/currency";
 
-type TabKey = "welcome" | "risk" | "crisis" | "ml" | "alpha" | "decision";
+type TabKey = "welcome" | "risk" | "crisis" | "ml" | "alpha" | "decision" | "report";
 type TabConfig = {
   key: TabKey;
   label: string;
+  desktopLabel: string;
   mobileLabel: string;
   icon: React.ElementType;
 };
@@ -52,6 +57,9 @@ const DEFAULT_TICKERS_BY_MARKET: Record<MarketMode, string> = {
   cn: "600519,300750,000001",
   mixed: "AAPL,NVDA,0005.HK,0007.HK",
 };
+
+const MARKET_SELECTION_STORAGE_KEY = "deepfirm.marketMode.v1";
+const MARKET_SNAPSHOT_STORAGE_KEY = "deepfirm.marketSnapshots.v1";
 
 const FLAG_ASSETS = {
   us: "https://cdn.jsdelivr.net/gh/lipis/flag-icons/flags/4x3/us.svg",
@@ -170,6 +178,63 @@ function getMarketValidationError(
     : null;
 }
 
+function readStoredMarketSnapshots(): Partial<Record<MarketMode, MarketSnapshotResult>> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const raw = window.localStorage.getItem(MARKET_SNAPSHOT_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw) as Partial<Record<MarketMode, MarketSnapshotResult>>;
+    const snapshots: Partial<Record<MarketMode, MarketSnapshotResult>> = {};
+    for (const option of MARKET_NAV_OPTIONS) {
+      const snapshot = parsed?.[option.key];
+      if (snapshot?.market === option.key && Array.isArray(snapshot.indices)) {
+        snapshots[option.key] = snapshot;
+      }
+    }
+    return snapshots;
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredMarketSnapshots(snapshots: Partial<Record<MarketMode, MarketSnapshotResult>>): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(MARKET_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshots));
+  } catch {
+    return;
+  }
+}
+
+function readStoredMarketMode(): MarketMode | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const value = window.localStorage.getItem(MARKET_SELECTION_STORAGE_KEY);
+    return MARKET_NAV_OPTIONS.some((option) => option.key === value) ? (value as MarketMode) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredMarketMode(nextMarket: MarketMode): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(MARKET_SELECTION_STORAGE_KEY, nextMarket);
+  } catch {
+    return;
+  }
+}
+
 export default function Home() {
   const { lang, setLang } = useLanguage();
   const { presets, addPreset, removePreset } = usePresets();
@@ -179,6 +244,10 @@ export default function Home() {
 
   const [tickers, setTickers] = useState(DEFAULT_TICKERS_BY_MARKET.us);
   const [market, setMarket] = useState<MarketMode>("us");
+  const [marketReady, setMarketReady] = useState(false);
+  const [marketSnapshots, setMarketSnapshots] = useState<Partial<Record<MarketMode, MarketSnapshotResult>>>({});
+  const [marketSnapshotsReady, setMarketSnapshotsReady] = useState(false);
+  const [marketSnapshotAutoRefreshDone, setMarketSnapshotAutoRefreshDone] = useState<Partial<Record<MarketMode, boolean>>>({});
   const [timeWindow, setTimeWindow] = useState("1Y");
   const [weights, setWeights] = useState<number[]>([]);
   const [capital, setCapital] = useState(1_000_000);
@@ -214,6 +283,10 @@ export default function Home() {
   const [alphaEffectiveStart, setAlphaEffectiveStart] = useState<string | null>(null);
   const [alphaEffectiveEnd, setAlphaEffectiveEnd] = useState<string | null>(null);
   const [optData, setOptData] = useState<OptimizationResult | null>(null);
+  const [reportData, setReportData] = useState<RiskReportResult | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const reportLanguageRefreshRef = useRef<Lang | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -222,7 +295,39 @@ export default function Home() {
   const handleMarketChange = useCallback((nextMarket: MarketMode) => {
     setMarket(nextMarket);
     setTickers(DEFAULT_TICKERS_BY_MARKET[nextMarket]);
+    writeStoredMarketMode(nextMarket);
     setError(null);
+    setReportError(null);
+    setReportData(null);
+  }, []);
+
+  const handleMarketSnapshotChange = useCallback((snapshot: MarketSnapshotResult) => {
+    setMarketSnapshots((current) => {
+      const next = {
+        ...current,
+        [snapshot.market]: snapshot,
+      };
+      writeStoredMarketSnapshots(next);
+      return next;
+    });
+  }, []);
+
+  const handleMarketSnapshotAutoRefreshComplete = useCallback((snapshotMarket: MarketMode) => {
+    setMarketSnapshotAutoRefreshDone((current) => ({
+      ...current,
+      [snapshotMarket]: true,
+    }));
+  }, []);
+
+  useEffect(() => {
+    const storedMarket = readStoredMarketMode();
+    if (storedMarket) {
+      setMarket(storedMarket);
+      setTickers(DEFAULT_TICKERS_BY_MARKET[storedMarket]);
+    }
+    setMarketSnapshots(readStoredMarketSnapshots());
+    setMarketReady(true);
+    setMarketSnapshotsReady(true);
   }, []);
 
   useEffect(() => {
@@ -243,15 +348,10 @@ export default function Home() {
     }
   }, [market, activeTab]);
 
-  const handleRun = useCallback(async () => {
-    setError(null);
-    setActiveTab((current) => (current === "ml" || current === "crisis" ? current : "risk"));
-
+  const buildAnalysisRequest = useCallback((): AnalysisRunRequest => {
     const tickerList = tickers.split(",").map((t) => t.trim()).filter(Boolean);
     if (tickerList.length === 0) {
-      setError(t(lang, "errorAtLeastOneTicker"));
-      setLoading(false);
-      return;
+      throw new Error(t(lang, "errorAtLeastOneTicker"));
     }
 
     const marketMode = market as MarketMode;
@@ -261,9 +361,7 @@ export default function Home() {
       lang
     );
     if (marketValidationError) {
-      setError(marketValidationError);
-      setLoading(false);
-      return;
+      throw new Error(marketValidationError);
     }
 
     const hasCustomWeights = weights.length === tickerList.length;
@@ -273,16 +371,10 @@ export default function Home() {
         0
       );
       if (Math.abs(weightTotal) <= 1e-12) {
-        setError(t(lang, "errorWeightsMustBePositive"));
-        setLoading(false);
-        return;
+        throw new Error(t(lang, "errorWeightsMustBePositive"));
       }
     }
 
-    setLoading(true);
-    setAnalysisCompleted(false);
-    setMlForecastData(null);
-    setCrisisWarningData(null);
     const { start, end } = computeDateRange(timeWindow);
     const normalizedWeights =
       hasCustomWeights
@@ -300,7 +392,7 @@ export default function Home() {
         ]
       : [];
 
-    const analysisReq: AnalysisRunRequest = {
+    return {
       tickers: tickerList,
       start_date: start,
       end_date: end,
@@ -327,6 +419,32 @@ export default function Home() {
       api_key: apiKey || undefined,
       allow_sandbox_data: allowSandboxData,
     };
+  }, [
+    tickers, market, timeWindow, weights, capital, leverage, mcPaths, mlHorizon, maxWeight,
+    minWeight, turnoverPenalty, concentrationPenalty, oosGuardEnabled, allocationMode, allowSandboxData,
+    backtestEnabled, testRatio, viewTicker, viewRelative, viewReturn, viewConfidence,
+    regimeModelType, apiKey, lang,
+  ]);
+
+  const handleRun = useCallback(async () => {
+    setError(null);
+    setReportError(null);
+    setActiveTab((current) => (current === "ml" || current === "crisis" || current === "report" ? current : "risk"));
+
+    let analysisReq: AnalysisRunRequest;
+    try {
+      analysisReq = buildAnalysisRequest();
+    } catch (err: any) {
+      setError(err.message || "Invalid analysis request.");
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setAnalysisCompleted(false);
+    setMlForecastData(null);
+    setCrisisWarningData(null);
+    setReportData(null);
 
     try {
       const result = await postApi<AnalysisRunResult>("/api/v1/analysis/run", analysisReq);
@@ -349,12 +467,58 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [
-    tickers, market, timeWindow, weights, capital, leverage, mcPaths, mlHorizon, maxWeight,
-    minWeight, turnoverPenalty, concentrationPenalty, oosGuardEnabled, allocationMode, allowSandboxData,
-    backtestEnabled, testRatio, viewTicker, viewRelative, viewReturn, viewConfidence,
-    regimeModelType, apiKey, lang,
-  ]);
+  }, [buildAnalysisRequest]);
+
+  const refreshRiskReport = useCallback(async (focusReport: boolean) => {
+    setReportError(null);
+    setError(null);
+    if (focusReport) {
+      setActiveTab("report");
+    }
+
+    let baseRequest: AnalysisRunRequest;
+    try {
+      baseRequest = buildAnalysisRequest();
+    } catch (err: any) {
+      setReportError(err.message || "Invalid report request.");
+      setReportLoading(false);
+      return;
+    }
+
+    const reportRequest: RiskReportRequest = {
+      ...baseRequest,
+      language: lang,
+    };
+
+    setReportLoading(true);
+    try {
+      const result = await postApi<RiskReportResult>("/api/v1/risk/report", reportRequest);
+      setReportData(result);
+    } catch (err: any) {
+      setReportError(err.message || "Report generation failed. Please check your inputs and try again.");
+    } finally {
+      setReportLoading(false);
+    }
+  }, [buildAnalysisRequest, lang]);
+
+  const handleGenerateReport = useCallback(() => {
+    void refreshRiskReport(true);
+  }, [refreshRiskReport]);
+
+  useEffect(() => {
+    if (!reportData || reportData.language === lang || reportLanguageRefreshRef.current === lang) {
+      return;
+    }
+
+    reportLanguageRefreshRef.current = lang;
+    void refreshRiskReport(false).finally(() => {
+      reportLanguageRefreshRef.current = null;
+    });
+  }, [lang, reportData, refreshRiskReport]);
+
+  const handlePrintReport = useCallback(() => {
+    window.print();
+  }, []);
 
   const handleSavePreset = useCallback((name: string) => {
     addPreset({
@@ -396,6 +560,7 @@ export default function Home() {
       : "us";
     setTickers(preset.tickers);
     setMarket(presetMarket);
+    writeStoredMarketMode(presetMarket);
     setTimeWindow(preset.timeWindow);
     setWeights(preset.weights);
     setCapital(preset.capital);
@@ -420,17 +585,18 @@ export default function Home() {
   }, []);
 
   const allTabs: TabConfig[] = [
-    { key: "welcome", label: t(lang, "welcome"), mobileLabel: t(lang, "welcome"), icon: Sparkles },
-    { key: "risk", label: t(lang, "risk"), mobileLabel: t(lang, "risk"), icon: Shield },
-    { key: "crisis", label: t(lang, "crisisWarningNav"), mobileLabel: t(lang, "crisisWarningMobile"), icon: Activity },
-    { key: "ml", label: t(lang, "machineLearningBeta"), mobileLabel: "ML", icon: BarChart3 },
-    { key: "alpha", label: t(lang, "alpha"), mobileLabel: t(lang, "alpha"), icon: TrendingUp },
-    { key: "decision", label: t(lang, "decision"), mobileLabel: t(lang, "decision"), icon: Scale },
+    { key: "welcome", label: t(lang, "welcome"), desktopLabel: t(lang, "welcome"), mobileLabel: t(lang, "welcome"), icon: Sparkles },
+    { key: "risk", label: t(lang, "risk"), desktopLabel: t(lang, "risk"), mobileLabel: t(lang, "risk"), icon: Shield },
+    { key: "crisis", label: t(lang, "crisisWarningNav"), desktopLabel: t(lang, "crisisWarningMobile"), mobileLabel: t(lang, "crisisWarningMobile"), icon: Activity },
+    { key: "ml", label: t(lang, "machineLearningBeta"), desktopLabel: t(lang, "machineLearningBeta"), mobileLabel: "ML", icon: BarChart3 },
+    { key: "alpha", label: t(lang, "alpha"), desktopLabel: t(lang, "alpha"), mobileLabel: t(lang, "alpha"), icon: TrendingUp },
+    { key: "decision", label: t(lang, "decision"), desktopLabel: t(lang, "decision"), mobileLabel: t(lang, "decision"), icon: Scale },
+    { key: "report", label: t(lang, "report"), desktopLabel: t(lang, "report"), mobileLabel: t(lang, "reportMobile"), icon: FileText },
   ];
   const tabs = allTabs.filter((tab) => market !== "cn" || tab.key !== "alpha");
   const currencySymbol = getCurrencySymbol(market);
   const mobileGridClass =
-    tabs.length === 6 ? "grid-cols-6" : tabs.length === 5 ? "grid-cols-5" : "grid-cols-4";
+    tabs.length === 7 ? "grid-cols-7" : tabs.length === 6 ? "grid-cols-6" : tabs.length === 5 ? "grid-cols-5" : "grid-cols-4";
 
   return (
     <div className="flex min-h-screen lg:h-screen lg:overflow-hidden">
@@ -552,7 +718,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="scrollbar-none -mx-3 hidden w-[calc(100%+1.5rem)] max-w-none flex-nowrap gap-2 overflow-x-auto px-3 pb-1 lg:flex lg:justify-end">
+              <div className="hidden max-w-full flex-nowrap gap-1.5 overflow-x-auto pb-1 lg:flex lg:justify-end">
                 {tabs.map((tab) => {
                   const Icon = tab.icon;
                   const isActive = activeTab === tab.key;
@@ -560,7 +726,9 @@ export default function Home() {
                     <button
                       key={tab.key}
                       onClick={() => setActiveTab(tab.key)}
-                      className={`relative isolate flex shrink-0 items-center gap-2 overflow-hidden rounded-full border px-4 py-2.5 text-sm font-medium transition-all click-press ${
+                      title={tab.label}
+                      aria-current={isActive ? "page" : undefined}
+                      className={`relative isolate flex shrink-0 items-center gap-1.5 overflow-hidden rounded-full border px-3 py-2 text-[13px] font-medium transition-all click-press xl:px-3.5 xl:text-sm ${
                         isActive
                           ? "border-transparent text-white"
                           : "bg-df-surface border border-df-border text-df-text-secondary hover:text-df-text hover-lift"
@@ -573,7 +741,7 @@ export default function Home() {
                         />
                       )}
                       <Icon size={16} className="relative z-10" />
-                      <span className="relative z-10">{tab.label}</span>
+                      <span className="relative z-10">{tab.desktopLabel}</span>
                     </button>
                   );
                 })}
@@ -592,7 +760,17 @@ export default function Home() {
             </div>
           )}
 
-          {activeTab === "welcome" && <WelcomeTab lang={lang} />}
+          {activeTab === "welcome" && (
+            <WelcomeTab
+              lang={lang}
+              market={market}
+              snapshotsReady={marketReady && marketSnapshotsReady}
+              shouldAutoRefresh={marketReady && marketSnapshotsReady && !marketSnapshotAutoRefreshDone[market]}
+              cachedSnapshot={marketSnapshots[market] ?? null}
+              onSnapshotChange={handleMarketSnapshotChange}
+              onAutoRefreshComplete={handleMarketSnapshotAutoRefreshComplete}
+            />
+          )}
           {activeTab === "risk" && <RiskTab data={riskData} loading={loading} lang={lang} currencySymbol={currencySymbol} />}
           {activeTab === "crisis" && <CrisisWarningTab crisisWarning={crisisWarningData} loading={loading} hasAnalysisRun={analysisCompleted} lang={lang} />}
           {activeTab === "ml" && <MachineLearningTab data={riskData} anomaly={anomalyData} regime={regimeData} mlForecast={mlForecastData} loading={loading} lang={lang} />}
@@ -610,6 +788,17 @@ export default function Home() {
             />
           )}
           {activeTab === "decision" && <DecisionTab data={optData} loading={loading} lang={lang} minWeight={minWeight} />}
+          {activeTab === "report" && (
+            <ReportTab
+              data={reportData}
+              loading={reportLoading}
+              error={reportError}
+              lang={lang}
+              currencySymbol={currencySymbol}
+              onGenerate={handleGenerateReport}
+              onPrint={handlePrintReport}
+            />
+          )}
 
           <footer className="mt-auto pt-8 pb-2 text-center">
             <span className="inline-flex items-center justify-center rounded-full border border-df-border bg-df-surface/80 px-3.5 py-1.5 text-[11px] font-medium text-df-text-secondary shadow-[0_10px_24px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:bg-df-surface/70">

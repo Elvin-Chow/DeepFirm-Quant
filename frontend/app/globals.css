@@ -321,3 +321,275 @@ input[type="range"].df-slider::-moz-range-thumb {
   width: 50%;
   animation: loadingBar 1.2s ease-in-out infinite;
 }
+
+.report-section,
+.report-card {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.report-print-root {
+  --report-ink: #51483f;
+  --report-ink-strong: #3a2f28;
+  --report-ink-muted: #85776b;
+  --report-accent: #a44916;
+  --report-accent-soft: #c36a2d;
+  --report-green: #2f7d62;
+  --report-green-strong: #23644f;
+  --report-green-muted: #4f8d74;
+  --report-rule: rgba(126, 108, 88, 0.12);
+  --report-panel: rgba(255, 254, 251, 0.9);
+  --report-panel-strong: rgba(255, 250, 244, 0.82);
+  --report-panel-soft: rgba(255, 253, 249, 0.72);
+  background:
+    linear-gradient(112deg, rgba(217, 119, 6, 0.045) 0%, rgba(217, 119, 6, 0.018) 31%, transparent 58%),
+    linear-gradient(248deg, rgba(225, 29, 72, 0.032) 0%, rgba(225, 29, 72, 0.012) 37%, transparent 64%),
+    linear-gradient(180deg, #fffdf9 0%, #fff8f1 54%, #fff3e9 100%);
+  color: var(--report-ink);
+}
+
+.report-print-root header,
+.report-print-root .report-section {
+  border-color: var(--report-rule);
+}
+
+.report-print-root header + div > .report-section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.report-print-root .space-y-8 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 1.75rem;
+}
+
+.report-print-root .report-card,
+.report-print-root .bg-white,
+.report-print-root .bg-stone-50 {
+  background:
+    linear-gradient(180deg, var(--report-panel), var(--report-panel-soft)) !important;
+  border-color: rgba(132, 93, 58, 0.18) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    0 14px 34px -32px rgba(88, 58, 33, 0.36);
+}
+
+.report-print-root .report-card.bg-stone-50,
+.report-print-root .bg-stone-50 {
+  background:
+    linear-gradient(180deg, var(--report-panel-strong), rgba(255, 247, 239, 0.72)) !important;
+}
+
+.report-print-root h1 {
+  color: #7f3511;
+}
+
+.report-print-root h2 {
+  color: var(--report-green-strong);
+}
+
+.report-print-root h3 {
+  color: var(--report-accent);
+}
+
+.report-print-root .text-stone-950,
+.report-print-root .text-stone-900 {
+  color: var(--report-ink-strong);
+}
+
+.report-print-root .text-stone-800,
+.report-print-root .text-stone-700,
+.report-print-root p,
+.report-print-root li {
+  color: var(--report-ink);
+}
+
+.report-print-root .text-stone-600,
+.report-print-root .text-stone-500 {
+  color: var(--report-green-muted);
+}
+
+.report-print-root .text-rose-700 {
+  color: #bd3d38;
+}
+
+.report-print-root .text-emerald-700 {
+  color: #2f7d62;
+}
+
+.report-print-root [class*="uppercase"] {
+  color: var(--report-green-muted);
+}
+
+.report-print-root .border-stone-200,
+.report-print-root .border-stone-300 {
+  border-color: var(--report-rule);
+}
+
+.report-print-root .bg-stone-200 {
+  background-color: rgba(134, 105, 83, 0.14);
+}
+
+.report-print-root .bg-stone-900 {
+  background: linear-gradient(90deg, #b85b24, #df8a47);
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+
+  html,
+  body {
+    width: 100%;
+    min-height: auto;
+    overflow: visible !important;
+    background:
+      linear-gradient(112deg, rgba(217, 119, 6, 0.045) 0%, rgba(217, 119, 6, 0.018) 31%, transparent 58%),
+      linear-gradient(248deg, rgba(225, 29, 72, 0.032) 0%, rgba(225, 29, 72, 0.012) 37%, transparent 64%),
+      linear-gradient(180deg, #fffdf9 0%, #fff8f1 54%, #fff3e9 100%) !important;
+    color: #51483f !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .report-print-root,
+  .report-print-root * {
+    visibility: visible;
+  }
+
+  .report-print-root {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background:
+      linear-gradient(112deg, rgba(217, 119, 6, 0.045) 0%, rgba(217, 119, 6, 0.018) 31%, transparent 58%),
+      linear-gradient(248deg, rgba(225, 29, 72, 0.032) 0%, rgba(225, 29, 72, 0.012) 37%, transparent 64%),
+      linear-gradient(180deg, #fffdf9 0%, #fff8f1 54%, #fff3e9 100%) !important;
+    color: #51483f !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .report-actions,
+  aside,
+  nav,
+  footer {
+    display: none !important;
+  }
+
+  .report-section {
+    padding-top: 18px !important;
+    margin-top: 0 !important;
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+
+  .report-section h2,
+  .report-section h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .report-print-root header + div > .report-section:first-child {
+    border-top: 0 !important;
+    padding-top: 0 !important;
+  }
+
+  .report-print-root .space-y-8 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 1.75rem !important;
+  }
+
+  .report-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .report-print-root .report-card,
+  .report-print-root .bg-white,
+  .report-print-root .bg-stone-50 {
+    background:
+      linear-gradient(180deg, rgba(255, 254, 251, 0.9), rgba(255, 253, 249, 0.72)) !important;
+    border-color: rgba(126, 108, 88, 0.14) !important;
+  }
+
+  .report-print-root .report-card.bg-stone-50,
+  .report-print-root .bg-stone-50 {
+    background:
+      linear-gradient(180deg, rgba(255, 250, 244, 0.82), rgba(255, 247, 239, 0.72)) !important;
+  }
+
+  .report-print-root h1,
+  .report-print-root h2,
+  .report-print-root h3,
+  .report-print-root p,
+  .report-print-root span,
+  .report-print-root div,
+  .report-print-root li {
+    color: #51483f !important;
+    text-shadow: none !important;
+  }
+
+  .report-print-root h1 {
+    color: #7f3511 !important;
+  }
+
+  .report-print-root h2 {
+    color: #23644f !important;
+  }
+
+  .report-print-root h3 {
+    color: #a44916 !important;
+  }
+
+  .report-print-root .text-stone-950,
+  .report-print-root .text-stone-900 {
+    color: #3a2f28 !important;
+  }
+
+  .report-print-root .text-stone-600,
+  .report-print-root .text-stone-500 {
+    color: #4f8d74 !important;
+  }
+
+  .report-print-root .text-rose-700 {
+    color: #bd3d38 !important;
+  }
+
+  .report-print-root .text-emerald-700 {
+    color: #2f7d62 !important;
+  }
+
+  .report-print-root [class*="uppercase"] {
+    color: #4f8d74 !important;
+  }
+
+  .report-print-root .bg-stone-200 {
+    background-color: rgba(134, 105, 83, 0.14) !important;
+  }
+
+  .report-print-root .bg-stone-900 {
+    background: linear-gradient(90deg, #b85b24, #df8a47) !important;
+  }
+
+  .report-print-root .bg-stone-900,
+  .report-print-root .bg-amber-700,
+  .report-print-root .bg-rose-700,
+  .report-print-root .bg-emerald-700 {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}

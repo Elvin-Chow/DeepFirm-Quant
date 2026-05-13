@@ -1,5 +1,35 @@
 export type MarketMode = "us" | "hk" | "cn" | "mixed";
 
+export type MarketSessionStatus = "open" | "lunch_break" | "closed" | "unknown";
+export type MarketIndexStatus = "ok" | "unavailable";
+
+export interface MarketSnapshotIndex {
+  symbol: string;
+  name: string;
+  name_zh: string;
+  name_tc: string;
+  price: number | null;
+  change: number | null;
+  change_percent: number | null;
+  asof_date: string | null;
+  source: string;
+  source_detail: string;
+  status: MarketIndexStatus;
+  warning: string;
+}
+
+export interface MarketSnapshotResult {
+  market: MarketMode;
+  session_status: MarketSessionStatus;
+  timezone: string;
+  local_time: string;
+  updated_at: string;
+  indices: MarketSnapshotIndex[];
+  source: string;
+  source_detail: string;
+  data_warnings: string[];
+}
+
 export interface ViewSpec {
   assets: string[];
   relative_assets?: string[];
@@ -338,4 +368,131 @@ export interface AnalysisRunResult {
   regime?: RiskRegimeResult | null;
   ml_forecast?: RiskMLForecastResult | null;
   crisis_warning?: CrisisWarningResult | null;
+}
+
+export type ReportLanguage = "en" | "zh" | "tc";
+export type ReportSeverity = "info" | "warning" | "limitation";
+export type RiskReportMetricValue = string | number | boolean | string[] | null;
+
+export interface RiskReportRequest extends AnalysisRunRequest {
+  language?: ReportLanguage;
+  include_sections?: string[];
+  report_title?: string;
+}
+
+export interface RiskReportMetric {
+  key: string;
+  label: string;
+  value: RiskReportMetricValue;
+  unit: string;
+  severity: ReportSeverity;
+  description: string;
+}
+
+export interface RiskReportSection {
+  key: string;
+  title: string;
+  summary: string;
+  metrics: RiskReportMetric[];
+  warnings: string[];
+  included: boolean;
+}
+
+export interface RiskReportMethodologyNote {
+  code: string;
+  title: string;
+  detail: string;
+  severity: ReportSeverity;
+}
+
+export interface RiskReportPortfolioOverview {
+  tickers: string[];
+  weights: number[];
+  market: MarketMode;
+  start_date: string;
+  end_date: string;
+  capital: number;
+  leverage: number;
+  currency: string;
+}
+
+export interface RiskReportTraditionalRisk {
+  historical_es: number | null;
+  monte_carlo_es: number | null;
+  absolute_loss_historical: number | null;
+  absolute_loss_monte_carlo: number | null;
+  annualized_volatility: number | null;
+  max_drawdown: number | null;
+  max_drawdown_date: string;
+}
+
+export interface RiskReportMLForecast {
+  ml_var: number | null;
+  ml_es: number | null;
+  risk_score: number | null;
+  risk_level: string;
+  top_features: string[];
+  diagnostics_summary: Record<string, RiskReportMetricValue>;
+}
+
+export interface RiskReportAnomaly {
+  anomaly_score: number | null;
+  alert_level: string;
+  main_reasons: string[];
+  decision_impact: string;
+}
+
+export interface RiskReportRegime {
+  current_regime: string;
+  smoothed_regime: string;
+  regime_probabilities: Record<string, number>;
+  volatility_multiplier: number | null;
+  correlation_multiplier: number | null;
+  recommended_stress_level: string;
+}
+
+export interface RiskReportCrisisDriver {
+  feature: string;
+  feature_value: number | null;
+  shap_value: number | null;
+  direction: string;
+}
+
+export interface RiskReportCrisisWarning {
+  crisis_probability: number | null;
+  warning_level: string;
+  model_health: string;
+  calibration_state: string;
+  top_risk_drivers: RiskReportCrisisDriver[];
+  risk_reducers: RiskReportCrisisDriver[];
+}
+
+export interface RiskReportDecisionSummary {
+  decision_policy: string;
+  recommended_weights: number[];
+  turnover: number | null;
+  benchmark_symbol: string;
+  benchmark_name: string;
+  oos_excess_return: number | null;
+  oos_optimized_sharpe: number | null;
+  model_score: number | null;
+  model_grade: string;
+}
+
+export interface RiskReportResult {
+  report_title: string;
+  generated_at: string;
+  language: ReportLanguage;
+  portfolio_overview: RiskReportPortfolioOverview;
+  traditional_risk: RiskReportTraditionalRisk;
+  ml_forecast?: RiskReportMLForecast | null;
+  anomaly?: RiskReportAnomaly | null;
+  regime?: RiskReportRegime | null;
+  crisis_warning?: RiskReportCrisisWarning | null;
+  decision_summary: RiskReportDecisionSummary;
+  executive_summary: string[];
+  sections: RiskReportSection[];
+  methodology_notes: RiskReportMethodologyNote[];
+  disclaimers: string[];
+  data_warnings: string[];
 }

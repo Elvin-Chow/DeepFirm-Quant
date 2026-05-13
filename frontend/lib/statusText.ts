@@ -154,6 +154,16 @@ export function localizeWarning(message: string, lang: Lang): string {
       "A股市值先验暂不可用，优化器已使用逆波动率均衡。",
       "A股市值先驗暫不可用，優化器已使用逆波動率均衡。",
     ],
+    "China A-share factor attribution is not supported yet.": [
+      "China A-share factor attribution is not supported yet.",
+      "中国 A 股因子归因暂未接入。",
+      "中國 A 股因子歸因暫未接入。",
+    ],
+    "real factors unavailable": [
+      "Real factors unavailable.",
+      "真实因子数据不可用。",
+      "真實因子資料不可用。",
+    ],
     "Probability calibration is compressed across a wide raw-score range; treat this reading as a baseline-calibrated signal.": [
       "Probability calibration is compressed across a wide raw-score range; treat this as a baseline-calibrated signal.",
       "概率校准在较宽的原始分数区间内被压平，本次读数应视为接近基准率的校准信号。",
@@ -189,6 +199,39 @@ export function localizeWarning(message: string, lang: Lang): string {
       "Sample is too short; historical risk fallback is being used.",
       "样本长度不足，已使用历史风险估计兜底。",
       "樣本長度不足，已使用歷史風險估計兜底。"
+    );
+  }
+
+  if (trimmed.startsWith("ML forecast is unavailable;")) {
+    return byLang(
+      lang,
+      "ML forecast was unavailable; this report omits ML forecast metrics.",
+      "ML 预测不可用，本报告未展示 ML 预测指标。",
+      "ML 預測不可用，本報告未展示 ML 預測指標。"
+    );
+  }
+  if (trimmed.startsWith("Anomaly detection is unavailable;")) {
+    return byLang(
+      lang,
+      "Anomaly detection was unavailable; this report omits anomaly metrics.",
+      "异常检测不可用，本报告未展示异常检测指标。",
+      "異常偵測不可用，本報告未展示異常偵測指標。"
+    );
+  }
+  if (trimmed.startsWith("Market regime detection is unavailable;")) {
+    return byLang(
+      lang,
+      "Market regime detection was unavailable; this report omits regime metrics.",
+      "市场状态识别不可用，本报告未展示状态指标。",
+      "市場狀態識別不可用，本報告未展示狀態指標。"
+    );
+  }
+  if (trimmed.startsWith("Crisis warning is unavailable;")) {
+    return byLang(
+      lang,
+      "Crisis warning was unavailable; this report omits crisis warning metrics.",
+      "危机预警不可用，本报告未展示危机预警指标。",
+      "危機預警不可用，本報告未展示危機預警指標。"
     );
   }
   return trimmed;

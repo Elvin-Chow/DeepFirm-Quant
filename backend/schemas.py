@@ -2,7 +2,7 @@
 
 import math
 from datetime import date
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -127,3 +127,192 @@ class AnalysisRunResult(BaseModel):
     regime: Optional[MarketRegimeResult] = Field(default=None)
     ml_forecast: Optional[MLRiskForecastResult] = Field(default=None)
     crisis_warning: Optional[CrisisWarningResult] = Field(default=None)
+
+
+MarketSessionStatus = Literal["open", "lunch_break", "closed", "unknown"]
+MarketIndexStatus = Literal["ok", "unavailable"]
+
+
+class MarketSnapshotIndex(BaseModel):
+    """Display contract for one market index quote."""
+
+    symbol: str
+    name: str
+    name_zh: str
+    name_tc: str
+    price: Optional[float] = Field(default=None)
+    change: Optional[float] = Field(default=None)
+    change_percent: Optional[float] = Field(default=None)
+    asof_date: Optional[str] = Field(default=None)
+    source: str = Field(default="")
+    source_detail: str = Field(default="")
+    status: MarketIndexStatus = Field(default="ok")
+    warning: str = Field(default="")
+
+
+class MarketSnapshotResult(BaseModel):
+    """Response for the landing-page market snapshot."""
+
+    market: MarketMode
+    session_status: MarketSessionStatus
+    timezone: str
+    local_time: str
+    updated_at: str
+    indices: List[MarketSnapshotIndex] = Field(default_factory=list)
+    source: str = Field(default="")
+    source_detail: str = Field(default="")
+    data_warnings: List[str] = Field(default_factory=list)
+
+
+ReportLanguage = Literal["en", "zh", "tc"]
+ReportSeverity = Literal["info", "warning", "limitation"]
+MetricValue = Union[str, float, int, bool, List[str], None]
+
+
+class RiskReportRequest(AnalysisRunRequest):
+    """Request for a structured risk report."""
+
+    language: ReportLanguage = Field(default="zh")
+    include_sections: Optional[List[str]] = Field(default=None)
+    report_title: Optional[str] = Field(default=None)
+
+
+class RiskReportMetric(BaseModel):
+    """Display-ready metric for report sections."""
+
+    key: str
+    label: str
+    value: MetricValue = None
+    unit: str = Field(default="")
+    severity: ReportSeverity = Field(default="info")
+    description: str = Field(default="")
+
+
+class RiskReportSection(BaseModel):
+    """Structured report section metadata."""
+
+    key: str
+    title: str
+    summary: str = Field(default="")
+    metrics: List[RiskReportMetric] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    included: bool = Field(default=True)
+
+
+class RiskReportMethodologyNote(BaseModel):
+    """Methodology, limitation, or data note attached to the report."""
+
+    code: str
+    title: str
+    detail: str
+    severity: ReportSeverity = Field(default="info")
+
+
+class RiskReportPortfolioOverview(BaseModel):
+    """Portfolio identity and run configuration for a report."""
+
+    tickers: List[str]
+    weights: List[float]
+    market: MarketMode
+    start_date: str
+    end_date: str
+    capital: float
+    leverage: float
+    currency: str
+
+
+class RiskReportTraditionalRisk(BaseModel):
+    """Traditional risk metrics for a report."""
+
+    historical_es: Optional[float] = None
+    monte_carlo_es: Optional[float] = None
+    absolute_loss_historical: Optional[float] = None
+    absolute_loss_monte_carlo: Optional[float] = None
+    annualized_volatility: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    max_drawdown_date: str = Field(default="")
+
+
+class RiskReportMLForecast(BaseModel):
+    """ML downside forecast summary for a report."""
+
+    ml_var: Optional[float] = None
+    ml_es: Optional[float] = None
+    risk_score: Optional[float] = None
+    risk_level: str = Field(default="")
+    top_features: List[str] = Field(default_factory=list)
+    diagnostics_summary: Dict[str, MetricValue] = Field(default_factory=dict)
+
+
+class RiskReportAnomaly(BaseModel):
+    """Risk anomaly summary for a report."""
+
+    anomaly_score: Optional[float] = None
+    alert_level: str = Field(default="")
+    main_reasons: List[str] = Field(default_factory=list)
+    decision_impact: str = Field(default="")
+
+
+class RiskReportRegime(BaseModel):
+    """Market regime summary for a report."""
+
+    current_regime: str = Field(default="")
+    smoothed_regime: str = Field(default="")
+    regime_probabilities: Dict[str, float] = Field(default_factory=dict)
+    volatility_multiplier: Optional[float] = None
+    correlation_multiplier: Optional[float] = None
+    recommended_stress_level: str = Field(default="")
+
+
+class RiskReportCrisisDriver(BaseModel):
+    """One crisis warning driver for report display."""
+
+    feature: str
+    feature_value: Optional[float] = None
+    shap_value: Optional[float] = None
+    direction: str
+
+
+class RiskReportCrisisWarning(BaseModel):
+    """Explainable crisis warning summary for a report."""
+
+    crisis_probability: Optional[float] = None
+    warning_level: str = Field(default="")
+    model_health: str = Field(default="")
+    calibration_state: str = Field(default="")
+    top_risk_drivers: List[RiskReportCrisisDriver] = Field(default_factory=list)
+    risk_reducers: List[RiskReportCrisisDriver] = Field(default_factory=list)
+
+
+class RiskReportDecisionSummary(BaseModel):
+    """Decision and OOS summary for a report."""
+
+    decision_policy: str = Field(default="")
+    recommended_weights: List[float] = Field(default_factory=list)
+    turnover: Optional[float] = None
+    benchmark_symbol: str = Field(default="")
+    benchmark_name: str = Field(default="")
+    oos_excess_return: Optional[float] = None
+    oos_optimized_sharpe: Optional[float] = None
+    model_score: Optional[float] = None
+    model_grade: str = Field(default="")
+
+
+class RiskReportResult(BaseModel):
+    """Structured response for a risk report."""
+
+    report_title: str
+    generated_at: str
+    language: ReportLanguage
+    portfolio_overview: RiskReportPortfolioOverview
+    traditional_risk: RiskReportTraditionalRisk
+    ml_forecast: Optional[RiskReportMLForecast] = None
+    anomaly: Optional[RiskReportAnomaly] = None
+    regime: Optional[RiskReportRegime] = None
+    crisis_warning: Optional[RiskReportCrisisWarning] = None
+    decision_summary: RiskReportDecisionSummary
+    executive_summary: List[str] = Field(default_factory=list)
+    sections: List[RiskReportSection] = Field(default_factory=list)
+    methodology_notes: List[RiskReportMethodologyNote] = Field(default_factory=list)
+    disclaimers: List[str] = Field(default_factory=list)
+    data_warnings: List[str] = Field(default_factory=list)

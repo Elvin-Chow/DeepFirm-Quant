@@ -33,3 +33,24 @@ export async function postApi<T>(endpoint: string, payload: object): Promise<T> 
 
   return response.json() as Promise<T>;
 }
+
+export async function getApi<T>(endpoint: string, signal?: AbortSignal): Promise<T> {
+  const url = `${API_BASE_URL}${endpoint}`;
+  const response = await fetch(url, { cache: "no-store", signal });
+
+  if (!response.ok) {
+    const text = await response.text();
+    let message = text || `HTTP ${response.status}`;
+    try {
+      const parsed = JSON.parse(text);
+      if (typeof parsed?.detail === "string") {
+        message = parsed.detail;
+      }
+    } catch {
+      message = text || `HTTP ${response.status}`;
+    }
+    throw new ApiError(response.status, message);
+  }
+
+  return response.json() as Promise<T>;
+}

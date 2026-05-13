@@ -4,6 +4,20 @@ All notable changes to the DeepFirm Quant project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [V3.6.0] - 2026-05-13
+
+### Backend
+- Added `GET /api/v1/market/snapshot` for US, HK, CN, and mixed-market landing-page snapshots, including market-session state, primary index levels, changes, timestamps, and source metadata.
+- Hardened HK index snapshot handling so Hang Seng TECH can recover change and percentage-change values from Yahoo chart metadata when the provider returns only a single close row.
+- Added `POST /api/v1/risk/report` for structured portfolio risk reports that combine traditional risk, ML forecast, anomaly, regime, crisis warning, Decision/OOS summary, methodology notes, data warnings, and disclaimers.
+- Updated FastAPI metadata to version `3.6.0`.
+
+### Frontend
+- Reworked the Welcome page into a compact market overview with the welcome banner restored, live market status, a short daily market brief, and denser primary-index instrument cards.
+- Kept the full changelog available through collapsible version groups so historical release notes remain accessible without dominating the landing page.
+- Added a Report tab that generates, refreshes, and prints structured risk reports directly from the current portfolio inputs.
+- Updated frontend release notes and package metadata to version `3.6.0`.
+
 ## [V3.5.1] - 2026-05-12
 
 ### Backend
