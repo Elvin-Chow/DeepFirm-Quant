@@ -1,3 +1,9 @@
+---
+title: DeepFirm Quant API
+sdk: docker
+app_port: 7860
+---
+
 # DeepFirm Quant
 
 ![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)
