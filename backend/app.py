@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 import os
@@ -29,6 +30,14 @@ def _configured_origins() -> list[str]:
     ]
 
 
+def _backend_startup_timeout_seconds() -> float:
+    try:
+        value = float(os.getenv("DFQ_BACKEND_STARTUP_TIMEOUT_SECONDS", "60"))
+    except ValueError:
+        return 60.0
+    return max(1.0, value)
+
+
 def _load_backend_app() -> ASGIApp:
     global _backend_app
     if _backend_app is not None:
@@ -45,7 +54,23 @@ class LazyBackendApp:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         try:
-            backend_app = _load_backend_app()
+            backend_app = await asyncio.wait_for(
+                asyncio.to_thread(_load_backend_app),
+                timeout=_backend_startup_timeout_seconds(),
+            )
+        except asyncio.TimeoutError:
+            logger.exception("full backend startup timed out")
+            response = JSONResponse(
+                {
+                    "detail": (
+                        "Backend startup timed out. Please retry shortly while analytics "
+                        "dependencies finish loading."
+                    )
+                },
+                status_code=504,
+            )
+            await response(scope, receive, send)
+            return
         except Exception as exc:
             logger.exception("full backend startup failed")
             response = JSONResponse(

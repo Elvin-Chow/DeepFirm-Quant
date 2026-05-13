@@ -1,4 +1,5 @@
 import asyncio
+import time
 import unittest
 from datetime import date
 from unittest.mock import patch
@@ -166,6 +167,48 @@ class AnalysisWorkflowTests(unittest.TestCase):
         self.assertEqual(result.alpha_status, "unavailable")
         self.assertEqual(result.alpha_message, "real factors unavailable")
         self.assertEqual(result.optimization.tickers, ["AAA"])
+
+    def test_analysis_route_keeps_event_loop_responsive_during_service_work(self) -> None:
+        payload = api.AnalysisRunRequest(
+            tickers=["AAA"],
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 6, 30),
+            risk_free_rate=0.0,
+            use_market_cap_prior=False,
+        )
+        expected_result = api.AnalysisRunResult(
+            risk=RiskEvaluationResult(
+                tickers=["AAA"],
+                historical_es=0.01,
+                monte_carlo_es=0.012,
+                confidence_level=0.99,
+            ),
+            optimization=OptimizationResult(
+                tickers=["AAA"],
+                prior_returns=[0.1],
+                prior_weights=[1.0],
+                posterior_returns=[0.1],
+                posterior_weights=[1.0],
+                risk_aversion=2.5,
+            ),
+        )
+
+        async def slow_run_analysis(payload) -> api.AnalysisRunResult:
+            time.sleep(0.2)
+            return expected_result
+
+        async def exercise_route() -> api.AnalysisRunResult:
+            started_at = time.perf_counter()
+            task = asyncio.create_task(api.run_analysis(payload))
+            await asyncio.sleep(0.02)
+            elapsed = time.perf_counter() - started_at
+            self.assertLess(elapsed, 0.12)
+            return await task
+
+        with patch.object(api.analysis_service, "run_analysis", new=slow_run_analysis):
+            result = asyncio.run(exercise_route())
+
+        self.assertIs(result, expected_result)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
 """FastAPI backend for the DeepFirm Quant engine."""
 
+import asyncio
 import logging
 import os
-from typing import Optional
+from typing import Callable, Optional, TypeVar
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -43,6 +44,7 @@ from models import (
 
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 analysis_service = PortfolioAnalysisService(logger=logger)
 aligner = analysis_service.aligner
 factor_analyzer = analysis_service.factor_analyzer
@@ -75,6 +77,51 @@ app.add_middleware(
 )
 
 
+def _timeout_seconds(env_name: str, default: float) -> float:
+    try:
+        value = float(os.getenv(env_name, str(default)))
+    except ValueError:
+        return default
+    return max(1.0, value)
+
+
+def _analysis_timeout_seconds() -> float:
+    return _timeout_seconds("DFQ_ANALYSIS_TIMEOUT_SECONDS", 180.0)
+
+
+def _request_timeout_seconds() -> float:
+    return _timeout_seconds("DFQ_REQUEST_TIMEOUT_SECONDS", 90.0)
+
+
+def _snapshot_timeout_seconds() -> float:
+    return _timeout_seconds("DFQ_SNAPSHOT_TIMEOUT_SECONDS", 30.0)
+
+
+async def _run_blocking_operation(
+    operation_name: str,
+    operation: Callable[[], T],
+    timeout_seconds: float,
+) -> T:
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(operation),
+            timeout=timeout_seconds,
+        )
+    except asyncio.TimeoutError as exc:
+        logger.warning(
+            "%s timed out after %.1fs",
+            operation_name,
+            timeout_seconds,
+        )
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                f"{operation_name} timed out after {timeout_seconds:.0f} seconds. "
+                "Please retry shortly; upstream market data providers may be slow or rate limited."
+            ),
+        ) from exc
+
+
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     """Health probe endpoint."""
@@ -90,7 +137,11 @@ async def get_market_snapshot(market: str = "us", force_refresh: bool = False) -
     fetcher = _make_fetcher(api_key=None, allow_sandbox_data=False)
     if force_refresh:
         fetcher.disable_cache()
-    return build_market_snapshot(market, fetcher, force_refresh=force_refresh)
+    return await _run_blocking_operation(
+        "market snapshot",
+        lambda: build_market_snapshot(market, fetcher, force_refresh=force_refresh),
+        _snapshot_timeout_seconds(),
+    )
 
 
 def _make_fetcher(api_key: Optional[str], allow_sandbox_data: bool) -> SmartFetcher:
@@ -132,10 +183,16 @@ async def evaluate_risk(payload: RiskEvaluationRequest) -> RiskEvaluationResult:
     try:
         fetcher = _make_fetcher(payload.api_key, payload.allow_sandbox_data)
         engine = RiskEngine(fetcher=fetcher, aligner=aligner)
-        result = engine.evaluate(payload)
+        result = await _run_blocking_operation(
+            "risk evaluation",
+            lambda: engine.evaluate(payload),
+            _request_timeout_seconds(),
+        )
         _attach_data_provenance(result, fetcher)
     except (DataFetcherError, AlignmentError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return result
@@ -147,10 +204,16 @@ async def detect_risk_anomaly(payload: RiskAnomalyRequest) -> RiskAnomalyResult:
     try:
         fetcher = _make_fetcher(payload.api_key, payload.allow_sandbox_data)
         detector = RiskAnomalyDetector(fetcher=fetcher, aligner=aligner)
-        result = detector.evaluate(payload)
+        result = await _run_blocking_operation(
+            "risk anomaly detection",
+            lambda: detector.evaluate(payload),
+            _request_timeout_seconds(),
+        )
         _attach_data_provenance(result, fetcher)
     except (DataFetcherError, AlignmentError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return result
@@ -162,10 +225,16 @@ async def detect_market_regime(payload: MarketRegimeRequest) -> MarketRegimeResu
     try:
         fetcher = _make_fetcher(payload.api_key, payload.allow_sandbox_data)
         detector = MarketRegimeDetector(fetcher=fetcher, aligner=aligner)
-        result = detector.evaluate(payload)
+        result = await _run_blocking_operation(
+            "market regime detection",
+            lambda: detector.evaluate(payload),
+            _request_timeout_seconds(),
+        )
         _attach_data_provenance(result, fetcher)
     except (DataFetcherError, AlignmentError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return result
@@ -177,10 +246,16 @@ async def forecast_ml_risk(payload: MLRiskForecastRequest) -> MLRiskForecastResu
     try:
         fetcher = _make_fetcher(payload.api_key, payload.allow_sandbox_data)
         engine = MLRiskEngine(fetcher=fetcher, aligner=aligner)
-        result = engine.evaluate(payload)
+        result = await _run_blocking_operation(
+            "ML risk forecast",
+            lambda: engine.evaluate(payload),
+            _request_timeout_seconds(),
+        )
         _attach_data_provenance(result, fetcher)
     except (DataFetcherError, AlignmentError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return result
@@ -190,11 +265,17 @@ async def forecast_ml_risk(payload: MLRiskForecastRequest) -> MLRiskForecastResu
 async def crisis_warning(payload: CrisisWarningRequest) -> CrisisWarningResult:
     """Estimate explainable tail-risk event probability from offline artifacts."""
     try:
-        return crisis_warning_service.evaluate(payload)
+        return await _run_blocking_operation(
+            "crisis warning",
+            lambda: crisis_warning_service.evaluate(payload),
+            _request_timeout_seconds(),
+        )
     except CrisisWarningUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (DataFetcherError, AlignmentError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -207,17 +288,30 @@ async def fama_french_alpha(payload: AlphaAnalysisRequest) -> FactorRegressionRe
             raise ValueError("China A-share factor attribution is not supported yet.")
         fetcher = _make_fetcher(payload.api_key, payload.allow_sandbox_data)
         engine = RiskEngine(fetcher=fetcher, aligner=aligner)
-        price_df = engine._fetch_prices(
-            payload.tickers, payload.start_date, payload.end_date, market_mode=payload.market
+        price_df = await _run_blocking_operation(
+            "alpha price fetch",
+            lambda: engine._fetch_prices(
+                payload.tickers,
+                payload.start_date,
+                payload.end_date,
+                market_mode=payload.market,
+            ),
+            _request_timeout_seconds(),
         )
-        result = _run_alpha_from_prices(
-            payload.start_date,
-            payload.end_date,
-            price_df,
-            fetcher,
+        result = await _run_blocking_operation(
+            "alpha attribution",
+            lambda: _run_alpha_from_prices(
+                payload.start_date,
+                payload.end_date,
+                price_df,
+                fetcher,
+            ),
+            _request_timeout_seconds(),
         )
     except (DataFetcherError, AlignmentError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return result
@@ -227,7 +321,11 @@ async def fama_french_alpha(payload: AlphaAnalysisRequest) -> FactorRegressionRe
 async def run_analysis(payload: AnalysisRunRequest) -> AnalysisRunResult:
     """Run the complete analysis workflow from one request."""
     try:
-        return await analysis_service.run_analysis(payload)
+        return await _run_blocking_operation(
+            "analysis run",
+            lambda: asyncio.run(analysis_service.run_analysis(payload)),
+            _analysis_timeout_seconds(),
+        )
     except (DataFetcherError, AlignmentError, ValueError) as exc:
         logger.warning("analysis run failed error=%s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -242,7 +340,11 @@ async def run_analysis(payload: AnalysisRunRequest) -> AnalysisRunResult:
 async def generate_risk_report(payload: RiskReportRequest) -> RiskReportResult:
     """Generate a structured risk report from the full analysis workflow."""
     try:
-        return await analysis_service.generate_risk_report(payload)
+        return await _run_blocking_operation(
+            "risk report generation",
+            lambda: asyncio.run(analysis_service.generate_risk_report(payload)),
+            _analysis_timeout_seconds(),
+        )
     except (DataFetcherError, AlignmentError, ValueError) as exc:
         logger.warning("risk report generation failed error=%s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -259,19 +361,32 @@ async def optimize_portfolio(payload: PortfolioOptimizeRequest) -> OptimizationR
     try:
         fetcher = _make_fetcher(payload.api_key, payload.allow_sandbox_data)
         engine = RiskEngine(fetcher=fetcher, aligner=aligner)
-        price_df = engine._fetch_prices(
-            payload.tickers, payload.start_date, payload.end_date, market_mode=payload.market
+        price_df = await _run_blocking_operation(
+            "portfolio price fetch",
+            lambda: engine._fetch_prices(
+                payload.tickers,
+                payload.start_date,
+                payload.end_date,
+                market_mode=payload.market,
+            ),
+            _request_timeout_seconds(),
         )
         portfolio_source = fetcher.last_source
         portfolio_source_detail = fetcher.last_source_detail
-        return _optimize_portfolio_from_prices(
-            payload,
-            fetcher,
-            price_df,
-            portfolio_source=portfolio_source,
-            portfolio_source_detail=portfolio_source_detail,
+        return await _run_blocking_operation(
+            "portfolio optimization",
+            lambda: _optimize_portfolio_from_prices(
+                payload,
+                fetcher,
+                price_df,
+                portfolio_source=portfolio_source,
+                portfolio_source_detail=portfolio_source_detail,
+            ),
+            _request_timeout_seconds(),
         )
     except (DataFetcherError, AlignmentError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
