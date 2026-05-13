@@ -1,4 +1,4 @@
-import { API_BASE_URL } from "@/lib/constants";
+import { API_BASE_URL, DEFAULT_API_BASE_URL_IN_USE } from "@/lib/constants";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -20,6 +20,13 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+function isHostedFrontend(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return !["localhost", "127.0.0.1"].includes(window.location.hostname);
+}
+
 function normalizeFetchError(error: unknown, timedOut: boolean): Error {
   if (error instanceof ApiError) {
     return error;
@@ -31,9 +38,15 @@ function normalizeFetchError(error: unknown, timedOut: boolean): Error {
     );
   }
   if (error instanceof TypeError) {
+    if (DEFAULT_API_BASE_URL_IN_USE && isHostedFrontend()) {
+      return new ApiError(
+        0,
+        "The hosted frontend is pointing to the local API. Set NEXT_PUBLIC_API_BASE_URL to the hosted API URL and redeploy."
+      );
+    }
     return new ApiError(
       0,
-      "The hosted API did not return a valid response. Please retry shortly."
+      "The hosted API did not return a valid browser response. Check the API URL and CORS configuration, then retry shortly."
     );
   }
   return error instanceof Error ? error : new Error("Request failed.");

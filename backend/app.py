@@ -14,20 +14,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from backend.cors import configured_origin_regex, configured_origins
+
 
 logger = logging.getLogger(__name__)
 _backend_app: Optional[ASGIApp] = None
 _backend_lock = threading.Lock()
-
-
-def _configured_origins() -> list[str]:
-    origins_env = os.getenv("ALLOW_ORIGINS")
-    if origins_env:
-        return [origin.strip() for origin in origins_env.split(",") if origin.strip()]
-    return [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ]
 
 
 def _backend_startup_timeout_seconds() -> float:
@@ -90,7 +82,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_configured_origins(),
+    allow_origins=configured_origins(),
+    allow_origin_regex=configured_origin_regex(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

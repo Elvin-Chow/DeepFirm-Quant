@@ -1,4 +1,7 @@
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+const DEFAULT_API_BASE_URL = "http://localhost:8000";
+
+export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/+$/, "");
+export const DEFAULT_API_BASE_URL_IN_USE = API_BASE_URL === DEFAULT_API_BASE_URL;
 
 export const TIME_OPTIONS = ["3M", "6M", "1Y", "2Y", "5Y", "ALL"] as const;
 

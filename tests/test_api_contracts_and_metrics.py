@@ -1,12 +1,17 @@
+import os
 import unittest
 from datetime import date
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+import backend.app as hosted_entrypoint
 from backend import main as api
+from backend.cors import configured_origin_regex
 from models import ViewSpec
 from models.risk_engine import RiskEngine
 
@@ -110,6 +115,40 @@ class ApiContractTests(unittest.TestCase):
         )
         self.assertAlmostEqual(result.risk_free_rate, 0.02)
         self.assertTrue(any("Risk-free rate" in warning for warning in result.methodology_warnings))
+
+
+class CorsContractTests(unittest.TestCase):
+    def test_origin_allow_list_disables_default_regex(self) -> None:
+        with patch.dict(os.environ, {"ALLOW_ORIGINS": "https://risk.example.com"}, clear=True):
+            self.assertIsNone(configured_origin_regex())
+
+    def test_hosted_entrypoint_allows_vercel_preflight(self) -> None:
+        origin = "https://deepfirm-quant.vercel.app"
+        response = TestClient(hosted_entrypoint.app).options(
+            "/api/v1/analysis/run",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
+
+    def test_full_api_allows_vercel_preflight(self) -> None:
+        origin = "https://deepfirm-quant.vercel.app"
+        response = TestClient(api.app).options(
+            "/api/v1/analysis/run",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
 
 
 if __name__ == "__main__":
