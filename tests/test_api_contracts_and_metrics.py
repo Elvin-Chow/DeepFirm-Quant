@@ -185,7 +185,6 @@ class CorsContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
 
-<<<<<<< HEAD
     def test_full_api_allows_hugging_face_space_preflight(self) -> None:
         origin = "https://deepfirm-quant.hf.space"
         response = TestClient(api.app).options(
@@ -200,24 +199,18 @@ class CorsContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
 
-=======
->>>>>>> bf824594f0ee281f7b2803614cc4f972e3834fd6
     def test_full_api_root_probe_is_available(self) -> None:
         response = TestClient(api.app).get("/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
 
-<<<<<<< HEAD
     def test_analysis_parallelism_is_opt_in(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             self.assertFalse(api.analysis_service.parallel_analysis_enabled())
 
         with patch.dict(os.environ, {"DFQ_ANALYSIS_PARALLEL": "true"}, clear=True):
             self.assertTrue(api.analysis_service.parallel_analysis_enabled())
-
-=======
->>>>>>> bf824594f0ee281f7b2803614cc4f972e3834fd6
 
 if __name__ == "__main__":
     unittest.main()
