@@ -165,6 +165,12 @@ class CorsContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
 
+    def test_full_api_root_probe_is_available(self) -> None:
+        response = TestClient(api.app).get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
 
 if __name__ == "__main__":
     unittest.main()
