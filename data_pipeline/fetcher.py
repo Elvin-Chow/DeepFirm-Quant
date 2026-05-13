@@ -388,6 +388,22 @@ class SmartFetcher:
             return 3.0
 
     @staticmethod
+    def _yahoo_chart_timeout_seconds() -> float:
+        """Return the Yahoo chart request timeout used for equity fetches."""
+        try:
+            return max(1.0, float(os.getenv("DFQ_YAHOO_CHART_TIMEOUT_SECONDS", "8")))
+        except ValueError:
+            return 8.0
+
+    @staticmethod
+    def _yfinance_timeout_seconds() -> float:
+        """Return the yfinance request timeout used for equity fetches."""
+        try:
+            return max(1.0, float(os.getenv("DFQ_YFINANCE_TIMEOUT_SECONDS", "8")))
+        except ValueError:
+            return 8.0
+
+    @staticmethod
     def _akshare_attempts() -> int:
         """Return the configured AKShare attempt count for A-share fetches."""
         try:
@@ -560,7 +576,12 @@ class SmartFetcher:
         for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
             url = f"https://{host}/v8/finance/chart/{yf_symbol}"
             try:
-                response = self._session.get(url, params=params, headers=headers, timeout=20)
+                response = self._session.get(
+                    url,
+                    params=params,
+                    headers=headers,
+                    timeout=self._yahoo_chart_timeout_seconds(),
+                )
                 response.raise_for_status()
                 payload = response.json()
                 chart = payload.get("chart", {})
@@ -647,7 +668,11 @@ class SmartFetcher:
             yf_symbol = self._normalize_yf_symbol(symbol)
             try:
                 ticker = yf.Ticker(yf_symbol)
-                df = ticker.history(start=start_date.isoformat(), end=end_date.isoformat())
+                df = ticker.history(
+                    start=start_date.isoformat(),
+                    end=end_date.isoformat(),
+                    timeout=self._yfinance_timeout_seconds(),
+                )
                 SmartFetcher._yf_last_call_time = time.time()
             except Exception as exc:
                 self._register_yf_failure(exc)
@@ -924,6 +949,7 @@ class SmartFetcher:
                     auto_adjust=False,
                     group_by="column",
                     threads=False,
+                    timeout=self._yfinance_timeout_seconds(),
                 )
                 SmartFetcher._yf_last_call_time = time.time()
             except Exception as exc:

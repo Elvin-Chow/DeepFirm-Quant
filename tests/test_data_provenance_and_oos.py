@@ -395,6 +395,52 @@ class FetcherCacheTests(unittest.TestCase):
         self.assertEqual(SmartFetcher._yf_cooldown_until, 0.0)
         self.assertGreater(SmartFetcher._yahoo_chart_cooldown_until, 0.0)
 
+    def test_yfinance_history_uses_bounded_timeout(self) -> None:
+        prices = pd.DataFrame(
+            {"Close": np.linspace(100.0, 110.0, 22)},
+            index=pd.date_range("2026-01-01", periods=22, freq="B"),
+        )
+
+        with TemporaryDirectory() as tmp_dir:
+            fetcher = SmartFetcher(cache_name=f"{tmp_dir}/http_cache")
+
+            with patch.object(fetcher, "_fetch_yahoo_chart", side_effect=RuntimeError("chart unavailable")):
+                with patch.object(fetcher, "_yfinance_timeout_seconds", return_value=2.5):
+                    with patch("data_pipeline.fetcher.yf.Ticker") as ticker_cls:
+                        ticker_cls.return_value.history.return_value = prices
+                        fetcher.fetch_us_equity(
+                            "AAA",
+                            date(2026, 1, 1),
+                            date(2026, 1, 31),
+                        )
+
+        self.assertEqual(ticker_cls.return_value.history.call_args.kwargs["timeout"], 2.5)
+
+    def test_yfinance_batch_download_uses_bounded_timeout(self) -> None:
+        dates = pd.date_range("2026-01-01", periods=22, freq="B")
+        batch_df = pd.DataFrame(
+            np.column_stack([
+                np.linspace(100.0, 110.0, len(dates)),
+                np.linspace(200.0, 210.0, len(dates)),
+            ]),
+            index=dates,
+            columns=pd.MultiIndex.from_product([["Close"], ["AAA", "BBB"]]),
+        )
+
+        with TemporaryDirectory() as tmp_dir:
+            fetcher = SmartFetcher(cache_name=f"{tmp_dir}/http_cache")
+
+            with patch.object(fetcher, "_fetch_yahoo_chart", side_effect=RuntimeError("chart unavailable")):
+                with patch.object(fetcher, "_yfinance_timeout_seconds", return_value=2.5):
+                    with patch("data_pipeline.fetcher.yf.download", return_value=batch_df) as download:
+                        fetcher.fetch_equity_batch(
+                            ["AAA", "BBB"],
+                            date(2026, 1, 1),
+                            date(2026, 1, 31),
+                        )
+
+        self.assertEqual(download.call_args.kwargs["timeout"], 2.5)
+
     def test_sandbox_data_requires_opt_in(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             fetcher = SmartFetcher(

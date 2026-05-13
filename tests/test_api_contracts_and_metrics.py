@@ -171,6 +171,13 @@ class CorsContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
 
+    def test_analysis_parallelism_is_opt_in(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(api.analysis_service.parallel_analysis_enabled())
+
+        with patch.dict(os.environ, {"DFQ_ANALYSIS_PARALLEL": "true"}, clear=True):
+            self.assertTrue(api.analysis_service.parallel_analysis_enabled())
+
 
 if __name__ == "__main__":
     unittest.main()

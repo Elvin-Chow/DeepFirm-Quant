@@ -3,6 +3,7 @@
 import asyncio
 import importlib
 import logging
+import os
 import queue
 import threading
 import time
@@ -133,6 +134,11 @@ class PortfolioAnalysisService:
             return fn()
         finally:
             timings[name] = round(time.perf_counter() - started, 4)
+
+    @staticmethod
+    def parallel_analysis_enabled() -> bool:
+        value = os.getenv("DFQ_ANALYSIS_PARALLEL", "").strip().lower()
+        return value in {"1", "true", "yes", "on"}
 
     def run_alpha_from_prices(
         self,
@@ -651,14 +657,22 @@ class PortfolioAnalysisService:
                 )
                 raise
 
-        risk_result, alpha_result, anomaly_result, regime_result, ml_result, crisis_result = await asyncio.gather(
-            asyncio.to_thread(self.timed_stage, timings, "risk", build_risk),
-            asyncio.to_thread(self.timed_stage, timings, "alpha", build_alpha),
-            asyncio.to_thread(self.timed_stage, timings, "anomaly", build_anomaly),
-            asyncio.to_thread(self.timed_stage, timings, "regime", build_regime),
-            asyncio.to_thread(self.timed_stage, timings, "ml_forecast", build_ml),
-            asyncio.to_thread(self.timed_stage, timings, "crisis_warning", build_crisis_warning),
-        )
+        if self.parallel_analysis_enabled():
+            risk_result, alpha_result, anomaly_result, regime_result, ml_result, crisis_result = await asyncio.gather(
+                asyncio.to_thread(self.timed_stage, timings, "risk", build_risk),
+                asyncio.to_thread(self.timed_stage, timings, "alpha", build_alpha),
+                asyncio.to_thread(self.timed_stage, timings, "anomaly", build_anomaly),
+                asyncio.to_thread(self.timed_stage, timings, "regime", build_regime),
+                asyncio.to_thread(self.timed_stage, timings, "ml_forecast", build_ml),
+                asyncio.to_thread(self.timed_stage, timings, "crisis_warning", build_crisis_warning),
+            )
+        else:
+            risk_result = self.timed_stage(timings, "risk", build_risk)
+            alpha_result = self.timed_stage(timings, "alpha", build_alpha)
+            anomaly_result = self.timed_stage(timings, "anomaly", build_anomaly)
+            regime_result = self.timed_stage(timings, "regime", build_regime)
+            ml_result = self.timed_stage(timings, "ml_forecast", build_ml)
+            crisis_result = self.timed_stage(timings, "crisis_warning", build_crisis_warning)
 
         opt_payload = PortfolioOptimizeRequest(
             tickers=payload.tickers,
