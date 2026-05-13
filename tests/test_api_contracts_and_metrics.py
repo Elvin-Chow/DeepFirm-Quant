@@ -122,6 +122,21 @@ class CorsContractTests(unittest.TestCase):
         with patch.dict(os.environ, {"ALLOW_ORIGINS": "https://risk.example.com"}, clear=True):
             self.assertIsNone(configured_origin_regex())
 
+    def test_hosted_root_probe_does_not_import_full_backend(self) -> None:
+        with patch("backend.app._load_backend_app") as load_backend:
+            response = TestClient(hosted_entrypoint.app).get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+        load_backend.assert_not_called()
+
+    def test_hosted_root_head_probe_does_not_import_full_backend(self) -> None:
+        with patch("backend.app._load_backend_app") as load_backend:
+            response = TestClient(hosted_entrypoint.app).head("/")
+
+        self.assertEqual(response.status_code, 200)
+        load_backend.assert_not_called()
+
     def test_hosted_entrypoint_allows_vercel_preflight(self) -> None:
         origin = "https://deepfirm-quant.vercel.app"
         response = TestClient(hosted_entrypoint.app).options(

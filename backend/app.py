@@ -45,6 +45,11 @@ class LazyBackendApp:
     """Load the full analytics API only when an analytics route is requested."""
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope.get("type") == "http" and scope.get("path") in {"/", "/health"}:
+            response = JSONResponse({"status": "ok"})
+            await response(scope, receive, send)
+            return
+
         try:
             backend_app = await asyncio.wait_for(
                 asyncio.to_thread(_load_backend_app),
@@ -88,6 +93,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/")
+async def root_health_check() -> dict[str, str]:
+    """Root probe endpoint that does not import analytics dependencies."""
+    return {"status": "ok"}
+
+
+@app.head("/")
+async def root_head_check() -> dict[str, str]:
+    """Root HEAD probe endpoint that does not import analytics dependencies."""
+    return {"status": "ok"}
 
 
 @app.get("/health")
