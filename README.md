@@ -100,7 +100,7 @@ Visit `http://localhost:3000` in your browser after the development server start
 
 - Vercel frontend: set `NEXT_PUBLIC_API_BASE_URL` to the hosted Hugging Face Space API URL, without a trailing slash.
 - Hugging Face backend: set `ALLOW_ORIGINS` to the production Vercel URL and any trusted preview/custom domains when a strict allow-list is required.
-- If `ALLOW_ORIGINS` is omitted, the API accepts local development origins and Vercel preview/production domains under `https://*.vercel.app`.
+- If `ALLOW_ORIGINS` is omitted, the API accepts local development origins, Vercel preview/production domains under `https://*.vercel.app`, and Hugging Face Space domains under `https://*.hf.space`.
 
 ## Usage Workflow
 

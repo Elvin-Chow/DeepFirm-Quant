@@ -137,6 +137,12 @@ class CorsContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         load_backend.assert_not_called()
 
+    def test_hosted_entrypoint_routes_analysis_requests(self) -> None:
+        response = TestClient(hosted_entrypoint.app).post("/api/v1/analysis/run", json={})
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIsInstance(response.json().get("detail"), list)
+
     def test_hosted_entrypoint_allows_vercel_preflight(self) -> None:
         origin = "https://deepfirm-quant.vercel.app"
         response = TestClient(hosted_entrypoint.app).options(
@@ -151,8 +157,36 @@ class CorsContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
 
+    def test_hosted_entrypoint_allows_hugging_face_space_preflight(self) -> None:
+        origin = "https://deepfirm-quant.hf.space"
+        response = TestClient(hosted_entrypoint.app).options(
+            "/api/v1/analysis/run",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
+
     def test_full_api_allows_vercel_preflight(self) -> None:
         origin = "https://deepfirm-quant.vercel.app"
+        response = TestClient(api.app).options(
+            "/api/v1/analysis/run",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
+
+    def test_full_api_allows_hugging_face_space_preflight(self) -> None:
+        origin = "https://deepfirm-quant.hf.space"
         response = TestClient(api.app).options(
             "/api/v1/analysis/run",
             headers={

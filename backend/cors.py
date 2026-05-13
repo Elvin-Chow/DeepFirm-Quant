@@ -8,7 +8,7 @@ DEFAULT_ALLOW_ORIGINS = (
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 )
-DEFAULT_ALLOW_ORIGIN_REGEX = r"https://([a-z0-9-]+\.)*vercel\.app"
+DEFAULT_ALLOW_ORIGIN_REGEX = r"https://([a-z0-9-]+\.)*(vercel\.app|hf\.space)"
 
 
 def configured_origins() -> list[str]:
