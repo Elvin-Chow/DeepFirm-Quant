@@ -115,6 +115,18 @@ async def _run_blocking_operation(
         ) from exc
 
 
+@app.get("/")
+async def root_health_check() -> dict[str, str]:
+    """Root probe endpoint."""
+    return {"status": "ok"}
+
+
+@app.head("/")
+async def root_head_check() -> dict[str, str]:
+    """Root HEAD probe endpoint."""
+    return {"status": "ok"}
+
+
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     """Health probe endpoint."""
