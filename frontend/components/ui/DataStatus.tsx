@@ -41,9 +41,63 @@ export default function DataStatus({
   const warningCount = cleanWarnings.length;
   const visibleWarnings = cleanWarnings.slice(0, compact ? 4 : 12);
   const hiddenCount = Math.max(warningCount - visibleWarnings.length, 0);
+  const secondarySources = [
+    factorLabel ? { label: t(lang, "factorDataSource"), value: factorLabel } : null,
+    benchmarkLabel ? { label: t(lang, "benchmarkDataSource"), value: benchmarkLabel } : null,
+    riskFreeRateLabel ? { label: t(lang, "riskFreeRateSource"), value: riskFreeRateLabel } : null,
+  ].filter((item): item is { label: string; value: string } => Boolean(item));
+
+  if (compact) {
+    const hasDetails = secondarySources.length > 0 || warningCount > 0;
+
+    return (
+      <div className="glass-card rounded-lg px-4 py-3 text-sm text-df-text-secondary">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <Database size={17} className="shrink-0 text-df-accent-secondary" />
+            <span className="shrink-0 font-semibold">{t(lang, "dataSource")}</span>
+            <span className="truncate font-bold text-df-text">{sourceLabel}</span>
+          </span>
+          {hasDetails && (
+            <details className="group min-w-0">
+              <summary className="inline-flex cursor-pointer select-none items-center gap-1.5 rounded px-1 py-0.5 text-xs font-semibold text-df-text-secondary transition-colors hover:text-df-text">
+                {warningCount > 0 && <AlertCircle size={13} className="text-amber-200" />}
+                <span className="group-open:hidden">{t(lang, "showDataNotices")}</span>
+                <span className="hidden group-open:inline">{t(lang, "hideDataNotices")}</span>
+              </summary>
+              <div className="mt-2 flex max-w-full flex-wrap gap-2">
+                {secondarySources.map((item) => (
+                  <span
+                    key={item.label}
+                    className="max-w-full rounded border border-df-border bg-df-surface-solid/20 px-3 py-1.5 text-xs"
+                  >
+                    <span className="font-medium">{item.label}</span>{" "}
+                    <span className="font-semibold text-df-text">{item.value}</span>
+                  </span>
+                ))}
+                {visibleWarnings.map((warning) => (
+                  <span
+                    key={warning}
+                    className="max-w-full rounded border border-amber-300/25 bg-amber-400/5 px-3 py-1.5 text-xs leading-relaxed text-amber-100"
+                  >
+                    {localizeWarning(warning, lang)}
+                  </span>
+                ))}
+                {hiddenCount > 0 && (
+                  <span className="rounded border border-df-border bg-df-surface-solid/20 px-3 py-1.5 text-xs text-df-text-secondary">
+                    +{hiddenCount}
+                  </span>
+                )}
+              </div>
+            </details>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="rounded-2xl border border-df-border bg-df-surface-solid/20 px-3 py-3 text-xs text-df-text-secondary sm:px-4">
+    <div className="glass-card rounded-lg px-3 py-3 text-xs text-df-text-secondary sm:px-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4">
         <span className="inline-flex w-full min-w-0 items-center gap-2 sm:w-auto">
           <Database size={14} className="shrink-0 text-df-accent" />
@@ -69,7 +123,7 @@ export default function DataStatus({
           </span>
         )}
         {warningCount > 0 && (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/30 bg-amber-400/5 px-2.5 py-1 font-medium text-amber-700 dark:text-amber-200">
+          <span className="inline-flex items-center gap-1.5 rounded border border-amber-300/30 bg-amber-400/5 px-2.5 py-1 font-medium text-amber-200">
             <AlertCircle size={13} />
             {t(lang, "dataWarningCount").replace("{count}", String(warningCount))}
           </span>
@@ -78,7 +132,7 @@ export default function DataStatus({
 
       {warningCount > 0 && (
         <details className="group mt-2">
-          <summary className="inline-flex cursor-pointer select-none items-center gap-1.5 rounded-full px-1 py-1 text-[11px] font-medium text-df-text-secondary transition-colors hover:text-df-text">
+          <summary className="inline-flex cursor-pointer select-none items-center gap-1.5 rounded px-1 py-1 text-[11px] font-medium text-df-text-secondary transition-colors hover:text-df-text">
             <span className="group-open:hidden">{t(lang, "showDataNotices")}</span>
             <span className="hidden group-open:inline">{t(lang, "hideDataNotices")}</span>
           </summary>
@@ -86,13 +140,13 @@ export default function DataStatus({
             {visibleWarnings.map((warning) => (
               <span
                 key={warning}
-                className="max-w-full rounded-full border border-amber-300/25 bg-amber-400/5 px-3 py-1.5 leading-relaxed text-amber-800 dark:text-amber-100"
+                className="max-w-full rounded border border-amber-300/25 bg-amber-400/5 px-3 py-1.5 leading-relaxed text-amber-100"
               >
                 {localizeWarning(warning, lang)}
               </span>
             ))}
             {hiddenCount > 0 && (
-              <span className="rounded-full border border-df-border bg-df-surface-solid/20 px-3 py-1.5 text-df-text-secondary">
+              <span className="rounded border border-df-border bg-df-surface-solid/20 px-3 py-1.5 text-df-text-secondary">
                 +{hiddenCount}
               </span>
             )}

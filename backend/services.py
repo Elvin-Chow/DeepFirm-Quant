@@ -77,8 +77,11 @@ BENCHMARKS: dict[MarketMode, tuple[str, str]] = {
     "cn": ("000300", "CSI 300 Index"),
     "mixed": ("ACWI", "iShares MSCI ACWI ETF"),
 }
+RISK_BENCHMARK_SYMBOL = "SPY"
+RISK_BENCHMARK_NAME = "S&P 500"
 DEFAULT_RISK_FREE_RATE = 0.02
 RISK_FREE_TICKER = "^IRX"
+RISK_FREE_NAME = "Risk-free"
 REPORT_CURRENCY_BY_MARKET: dict[MarketMode, str] = {
     "us": "USD",
     "hk": "HKD",
@@ -311,6 +314,119 @@ class PortfolioAnalysisService:
         )
         return self.normalize_benchmark_prices(bench_resp.data, symbol)
 
+    def attach_risk_benchmark(
+        self,
+        result: RiskEvaluationResult,
+        request: RiskEvaluationRequest,
+        price_df: pd.DataFrame,
+    ) -> None:
+        """Attach a non-blocking S&P 500 comparison series to US risk results."""
+        if request.market != "us" or price_df.empty:
+            return
+
+        portfolio_index = pd.DatetimeIndex(price_df.index)
+        if portfolio_index.tz is not None:
+            portfolio_index = portfolio_index.tz_localize(None)
+        portfolio_index = portfolio_index.normalize()
+        if len(portfolio_index) < 2:
+            result.data_warnings.append("Risk comparison series unavailable: portfolio has fewer than two price observations")
+            return
+
+        benchmark_fetcher = self.make_fetcher(request.api_key, request.allow_sandbox_data)
+        try:
+            benchmark_df = self.fetch_benchmark_prices(
+                benchmark_fetcher,
+                RISK_BENCHMARK_SYMBOL,
+                request.start_date,
+                request.end_date,
+                "us",
+            )
+            benchmark_dates = pd.to_datetime(benchmark_df["Date"], errors="coerce")
+            benchmark_close = pd.to_numeric(benchmark_df["Close"], errors="coerce")
+            benchmark_series = pd.Series(
+                benchmark_close.to_numpy(dtype=float),
+                index=benchmark_dates.dt.tz_localize(None).dt.normalize(),
+            ).sort_index()
+            benchmark_series = benchmark_series.replace([np.inf, -np.inf], np.nan).dropna()
+            benchmark_series = benchmark_series[benchmark_series > 0.0]
+            if len(benchmark_series) < 2:
+                raise ValueError("benchmark has fewer than two valid observations")
+
+            aligned_close = benchmark_series.reindex(portfolio_index).ffill().bfill()
+            aligned_close = aligned_close.replace([np.inf, -np.inf], np.nan).dropna()
+            aligned_close = aligned_close[aligned_close > 0.0]
+            if len(aligned_close) < 2:
+                raise ValueError("benchmark does not overlap the portfolio window")
+
+            benchmark_returns = np.log(aligned_close / aligned_close.shift(1))
+            benchmark_returns = benchmark_returns.replace([np.inf, -np.inf], np.nan).dropna()
+            benchmark_returns = benchmark_returns.reindex(portfolio_index[1:]).dropna()
+            if benchmark_returns.empty:
+                raise ValueError("benchmark return series is empty after alignment")
+
+            cumulative = np.exp(np.cumsum(benchmark_returns.to_numpy(dtype=float))) - 1.0
+            result.benchmark_symbol = RISK_BENCHMARK_SYMBOL
+            result.benchmark_name = RISK_BENCHMARK_NAME
+            result.benchmark_cumulative_returns = cumulative.tolist()
+            result.benchmark_performance_dates = benchmark_returns.index.strftime("%Y-%m-%d").tolist()
+            result.benchmark_source = benchmark_fetcher.last_source
+            result.benchmark_source_detail = benchmark_fetcher.last_source_detail
+
+            warnings = list(result.data_warnings or [])
+            for warning in benchmark_fetcher.data_warnings:
+                if warning not in warnings:
+                    warnings.append(warning)
+            result.data_warnings = warnings
+        except (DataFetcherError, ValueError, KeyError, TypeError) as exc:
+            warning = f"{RISK_BENCHMARK_NAME} benchmark unavailable: {exc}"
+            if warning not in result.data_warnings:
+                result.data_warnings.append(warning)
+
+        risk_free_fetcher = self.make_fetcher(request.api_key, request.allow_sandbox_data)
+        try:
+            risk_free_response = risk_free_fetcher.fetch_us_equity(
+                RISK_FREE_TICKER,
+                request.start_date,
+                request.end_date,
+            )
+            risk_free_df = self.normalize_benchmark_prices(risk_free_response.data, RISK_FREE_TICKER)
+            risk_free_dates = pd.to_datetime(risk_free_df["Date"], errors="coerce")
+            risk_free_rates = pd.to_numeric(risk_free_df["Close"], errors="coerce")
+            risk_free_series = pd.Series(
+                risk_free_rates.to_numpy(dtype=float),
+                index=risk_free_dates.dt.tz_localize(None).dt.normalize(),
+            ).sort_index()
+            risk_free_series = risk_free_series.replace([np.inf, -np.inf], np.nan).dropna()
+            if risk_free_series.empty:
+                raise ValueError("risk-free series is empty")
+
+            normalized_rates = risk_free_series.where(risk_free_series <= 0.5, risk_free_series / 100.0)
+            normalized_rates = normalized_rates.clip(lower=-0.99)
+            aligned_rates = normalized_rates.reindex(portfolio_index).ffill().bfill()
+            aligned_rates = aligned_rates.replace([np.inf, -np.inf], np.nan).dropna()
+            aligned_rates = aligned_rates.reindex(portfolio_index[1:]).dropna()
+            if aligned_rates.empty:
+                raise ValueError("risk-free series does not overlap the portfolio window")
+
+            daily_returns = np.power(1.0 + aligned_rates.to_numpy(dtype=float), 1.0 / 252.0) - 1.0
+            cumulative = np.cumprod(1.0 + daily_returns) - 1.0
+            result.risk_free_symbol = RISK_FREE_TICKER
+            result.risk_free_name = RISK_FREE_NAME
+            result.risk_free_cumulative_returns = cumulative.tolist()
+            result.risk_free_performance_dates = aligned_rates.index.strftime("%Y-%m-%d").tolist()
+            result.risk_free_source = risk_free_fetcher.last_source
+            result.risk_free_source_detail = risk_free_fetcher.last_source_detail
+
+            warnings = list(result.data_warnings or [])
+            for warning in risk_free_fetcher.data_warnings:
+                if warning not in warnings:
+                    warnings.append(warning)
+            result.data_warnings = warnings
+        except (DataFetcherError, ValueError, KeyError, TypeError) as exc:
+            warning = f"{RISK_FREE_NAME} proxy unavailable: {exc}"
+            if warning not in result.data_warnings:
+                result.data_warnings.append(warning)
+
     def resolve_risk_free_rate(
         self,
         fetcher: SmartFetcher,
@@ -533,6 +649,7 @@ class PortfolioAnalysisService:
 
         def build_risk() -> RiskEvaluationResult:
             result = engine.evaluate_from_prices(risk_payload, price_df)
+            self.attach_risk_benchmark(result, risk_payload, price_df)
             self.attach_data_provenance(result, fetcher)
             return result
 

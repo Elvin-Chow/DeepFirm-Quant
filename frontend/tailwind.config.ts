@@ -22,14 +22,14 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
-        serif: ["Merriweather", "ui-serif", "Georgia", "serif"],
+        serif: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       boxShadow: {
         df: "var(--df-shadow)",
       },
       borderRadius: {
-        "df-card": "1.5rem",
-        "df-input": "1rem",
+        "df-card": "0.5rem",
+        "df-input": "0.5rem",
       },
     },
   },

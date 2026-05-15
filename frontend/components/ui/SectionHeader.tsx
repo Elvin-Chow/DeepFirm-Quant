@@ -11,10 +11,10 @@ interface SectionHeaderProps {
 
 export default function SectionHeader({ icon: Icon, title, helpText, right }: SectionHeaderProps) {
   return (
-    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="mb-4 flex flex-col gap-3 border-b border-df-border/70 pb-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-center gap-2">
-        <Icon size={18} className="text-df-accent" />
-        <h3 className="min-w-0 break-words text-sm font-bold uppercase tracking-wider text-df-text-secondary">
+        <Icon size={17} className="text-df-accent-secondary" />
+        <h3 className="min-w-0 break-words text-sm font-semibold text-df-text">
           {title}
         </h3>
         {helpText && <HelpTip text={helpText} />}

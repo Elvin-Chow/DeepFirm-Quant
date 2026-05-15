@@ -133,6 +133,13 @@ MarketSessionStatus = Literal["open", "lunch_break", "closed", "unknown"]
 MarketIndexStatus = Literal["ok", "unavailable"]
 
 
+class MarketSnapshotTrendPoint(BaseModel):
+    """One intraday price point for a market snapshot chart."""
+
+    timestamp: str
+    price: float
+
+
 class MarketSnapshotIndex(BaseModel):
     """Display contract for one market index quote."""
 
@@ -148,6 +155,7 @@ class MarketSnapshotIndex(BaseModel):
     source_detail: str = Field(default="")
     status: MarketIndexStatus = Field(default="ok")
     warning: str = Field(default="")
+    trend: List[MarketSnapshotTrendPoint] = Field(default_factory=list)
 
 
 class MarketSnapshotResult(BaseModel):

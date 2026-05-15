@@ -399,6 +399,30 @@ function SectionTitle({
   );
 }
 
+function EvidenceLegend({
+  unitLabel,
+  lang,
+}: {
+  unitLabel: string;
+  lang: Lang;
+}) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-4 gap-y-2 text-[11px] font-medium text-df-text-secondary">
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+        {t(lang, "riskReducers")}
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
+        {t(lang, "topRiskDrivers")}
+      </span>
+      <span className="font-mono text-[10px] uppercase tracking-normal text-df-text-secondary/80">
+        {unitLabel}
+      </span>
+    </div>
+  );
+}
+
 function MetricBlock({
   label,
   value,
@@ -431,12 +455,14 @@ function SignalTile({
   tone: Tone;
 }) {
   return (
-    <div className="min-w-0 border-t border-black/[0.07] py-2.5 dark:border-white/[0.08]">
-      <div className="flex min-w-0 items-center gap-2">
-        <Icon size={14} className={toneText[tone]} />
-        <div className="min-w-0 truncate text-[11px] font-semibold uppercase text-df-text-secondary">{label}</div>
+    <div className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] gap-3 border-t border-black/[0.07] py-3 first:border-t-0 dark:border-white/[0.08]">
+      <div className="flex h-8 w-8 items-center justify-center">
+        <Icon size={20} className={toneText[tone]} />
       </div>
-      <div className={`mt-1 truncate text-base font-semibold ${toneText[tone]}`}>{value}</div>
+      <div className="min-w-0">
+        <div className="min-w-0 truncate text-[11px] font-semibold uppercase text-df-text-secondary">{label}</div>
+        <div className={`mt-1 truncate text-lg font-semibold leading-tight ${toneText[tone]}`}>{value}</div>
+      </div>
     </div>
   );
 }
@@ -468,12 +494,10 @@ function ReadingMetric({
 
 function ProbabilitySummary({
   value,
-  label,
   detail,
   tone,
 }: {
   value: number;
-  label: string;
   detail: string;
   tone: Tone;
 }) {
@@ -481,19 +505,14 @@ function ProbabilitySummary({
 
   return (
     <div className="min-w-0">
-      <div className="flex items-end justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase text-df-text-secondary">{label}</div>
-          <div className="mt-1 text-sm leading-relaxed text-df-text-secondary">{detail}</div>
-        </div>
-        <div className={`shrink-0 text-4xl font-semibold sm:text-5xl ${toneText[tone]}`}>
-          {formatPercent(value)}
-        </div>
+      <div className={`text-5xl font-semibold leading-none sm:text-6xl ${toneText[tone]}`}>
+        {formatPercent(value)}
       </div>
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-black/[0.07] dark:bg-white/[0.08]">
+      <div className="mt-3 text-sm leading-relaxed text-df-text-secondary">{detail}</div>
+      <div className="mt-5 h-2 overflow-hidden rounded-full bg-black/[0.07] dark:bg-white/[0.08]">
         <div className={`h-full rounded-full ${toneBar[tone]}`} style={{ width: `${percent}%` }} />
       </div>
-      <div className="mt-2 grid grid-cols-4 text-[10px] font-semibold uppercase text-df-text-secondary">
+      <div className="mt-2 grid grid-cols-4 text-[11px] font-medium text-df-text-secondary">
         <span>0</span>
         <span className="text-center">25</span>
         <span className="text-center">50</span>
@@ -515,12 +534,12 @@ function ReadingPoint({
   tone?: Tone;
 }) {
   return (
-    <div className="min-w-0 border-t border-black/[0.07] pt-3 dark:border-white/[0.08]">
-      <div className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-df-text">
-        <Icon size={15} className={toneText[tone]} />
-        <span>{title}</span>
+    <div className="min-w-0 border-t border-black/[0.07] pt-4 dark:border-white/[0.08]">
+      <div className="mb-3 flex min-w-0 items-center gap-2 text-base font-semibold text-df-text">
+        <Icon size={18} className={`${toneText[tone]} shrink-0`} />
+        <span className="min-w-0 truncate">{title}</span>
       </div>
-      <div className="text-sm leading-relaxed text-df-text-secondary">{children}</div>
+      <div className="text-sm leading-7 text-df-text-secondary sm:text-base">{children}</div>
     </div>
   );
 }
@@ -541,8 +560,8 @@ function DriverRow({
   const copy = featureCopy(driver.feature, lang);
   const magnitude = maxMagnitude > 0 ? Math.max(5, Math.min(100, (Math.abs(driver.shap_value) / maxMagnitude) * 100)) : 0;
   return (
-    <div className="py-2">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_6.75rem] sm:items-start">
+    <div className="py-3">
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7.25rem] sm:items-start">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-df-text">{copy.label}</div>
           <div className="mt-0.5 truncate font-mono text-[11px] text-df-text-secondary">{driver.feature}</div>
@@ -587,9 +606,9 @@ function DriverColumn({
 }) {
   return (
     <div className="min-w-0">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-df-text">
-          <Icon size={15} className={toneText[tone]} />
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2 text-base font-semibold text-df-text">
+          <Icon size={16} className={toneText[tone]} />
           <span className="truncate">{title}</span>
         </div>
         {hiddenCount > 0 && (
@@ -639,10 +658,6 @@ export default function CrisisWarningTab({
   const confidence = confidenceLabel(crisisWarning, lang);
   const fallbackUsed = crisisWarning.diagnostics.shap_fallback_used;
   const metrics = crisisWarning.diagnostics.validation_metrics;
-  const combinedDrivers = [
-    ...crisisWarning.top_risk_drivers.map((driver) => ({ ...driver, signed: driver.shap_value })),
-    ...crisisWarning.risk_reducers.map((driver) => ({ ...driver, signed: driver.shap_value })),
-  ].sort((left, right) => Math.abs(right.signed) - Math.abs(left.signed));
   const contributionUnit = fallbackUsed
     ? byLang(lang, "native score units", "原生贡献单位", "原生貢獻單位")
     : byLang(lang, "probability points", "概率百分点", "概率百分點");
@@ -661,9 +676,12 @@ export default function CrisisWarningTab({
     `组合未来 ${crisisWarning.horizon}D 进入尾部风险事件的估计概率。`,
     `組合未來 ${crisisWarning.horizon}D 進入尾部風險事件的估計概率。`
   );
-  const chartDrivers = combinedDrivers.slice(0, 8);
   const visibleRiskDrivers = crisisWarning.top_risk_drivers.slice(0, 3);
   const visibleReducers = crisisWarning.risk_reducers.slice(0, 3);
+  const chartDrivers = [...visibleRiskDrivers, ...visibleReducers].map((driver) => ({
+    ...driver,
+    chart_value: fallbackUsed ? driver.shap_value : driver.shap_value * 100,
+  }));
   const maxVisibleMagnitude = Math.max(
     0,
     ...visibleRiskDrivers.map((driver) => Math.abs(driver.shap_value)),
@@ -718,8 +736,7 @@ export default function CrisisWarningTab({
   return (
     <div className="space-y-3">
       <Panel className="overflow-hidden">
-        <div className={`h-1 ${toneBar[tone]}`} />
-        <div className="grid xl:grid-cols-[minmax(0,0.52fr)_minmax(18rem,0.26fr)_minmax(16rem,0.22fr)]">
+        <div className="grid xl:grid-cols-[minmax(0,0.42fr)_minmax(20rem,0.31fr)_minmax(16rem,0.27fr)]">
           <div className="min-w-0 p-4 sm:p-5 xl:border-r xl:border-black/[0.07] xl:p-6 xl:dark:border-white/[0.08]">
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-semibold text-df-text-secondary">
               <Activity size={16} className={toneText[tone]} />
@@ -746,13 +763,16 @@ export default function CrisisWarningTab({
           </div>
 
           <div className="min-w-0 border-t border-black/[0.08] p-4 dark:border-white/[0.08] sm:p-5 xl:border-r xl:border-t-0 xl:border-black/[0.07] xl:p-6 xl:dark:border-white/[0.08]">
+            <div className="mb-3 flex min-w-0 items-center gap-2 text-sm font-semibold text-df-text">
+              <Info size={16} className="shrink-0 text-df-text-secondary" />
+              <span className="min-w-0 truncate">{t(lang, "crisisProbability")}</span>
+            </div>
             <div className="mb-3 flex flex-wrap gap-2">
               <StatusBadge label={confidence.label} tone={confidence.tone} />
               <StatusBadge label={t(lang, "notTradingAdvice")} tone="neutral" />
             </div>
             <ProbabilitySummary
               value={crisisWarning.crisis_probability}
-              label={t(lang, "crisisProbability")}
               detail={probabilityDetail}
               tone={tone}
             />
@@ -773,7 +793,12 @@ export default function CrisisWarningTab({
                 value={crisisWarning.diagnostics.probability_calibrated ? t(lang, "calibrated") : t(lang, "rawProbability")}
                 tone={crisisWarning.diagnostics.probability_calibrated ? "good" : "neutral"}
               />
-              <SignalTile icon={BarChart3} label={t(lang, "baseValue")} value={formatPercent(crisisWarning.base_value)} tone="neutral" />
+              <SignalTile
+                icon={BarChart3}
+                label={t(lang, "positiveRate")}
+                value={formatPercent(crisisWarning.diagnostics.positive_rate, 2)}
+                tone="neutral"
+              />
             </div>
           </div>
         </div>
@@ -784,22 +809,22 @@ export default function CrisisWarningTab({
           <SectionTitle
             icon={BarChart3}
             title={byLang(lang, "Evidence board", "证据面板", "證據面板")}
-            right={<StatusBadge label={contributionUnit} tone="neutral" />}
+            right={<EvidenceLegend unitLabel={contributionUnit} lang={lang} />}
           />
-          <div className="grid items-stretch gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(23rem,1.05fr)]">
-            <div className="min-w-0">
+          <div className="grid items-stretch gap-5 xl:grid-cols-[minmax(22rem,0.9fr)_minmax(18rem,0.55fr)_minmax(18rem,0.55fr)] xl:gap-0">
+            <div className="min-w-0 xl:pr-6">
               {chartDrivers.length === 0 ? (
-                <div className="grid h-full min-h-[420px] place-items-center rounded-lg border border-black/[0.07] bg-black/[0.015] text-sm text-df-text-secondary dark:border-white/[0.08] dark:bg-white/[0.03]">
+                <div className="grid h-full min-h-[300px] place-items-center rounded-lg border border-black/[0.07] bg-black/[0.015] text-sm text-df-text-secondary dark:border-white/[0.08] dark:bg-white/[0.03] xl:min-h-[320px]">
                   {t(lang, "driverDataUnavailable")}
                 </div>
               ) : (
-                <div className="h-full min-h-[420px] min-w-0">
+                <div className="h-full min-h-[300px] min-w-0 xl:min-h-[320px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={chartDrivers}
                       layout="vertical"
-                      margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
-                      barCategoryGap={8}
+                      margin={{ top: 4, right: 14, left: 4, bottom: 0 }}
+                      barCategoryGap={10}
                     >
                       <defs>
                         <linearGradient id="riskDriverGradient" x1="0" y1="0" x2="1" y2="0">
@@ -818,12 +843,12 @@ export default function CrisisWarningTab({
                         axisLine={false}
                         tickLine={false}
                         tick={{ fontSize: 11, fill: "currentColor" }}
-                        tickFormatter={(value) => Number(value).toFixed(2)}
+                        tickFormatter={(value) => Number(value).toFixed(fallbackUsed ? 2 : 0)}
                       />
                       <YAxis
                         type="category"
                         dataKey="feature"
-                        width={126}
+                        width={158}
                         axisLine={false}
                         tickLine={false}
                         tick={{ fontSize: 11, fill: "currentColor" }}
@@ -833,17 +858,17 @@ export default function CrisisWarningTab({
                         content={
                           <ThemedTooltip
                             formatter={(value) => [
-                              formatContribution(Number(value), fallbackUsed),
+                              formatContribution(fallbackUsed ? Number(value) : Number(value) / 100, fallbackUsed),
                               t(lang, "shapContribution"),
                             ]}
                           />
                         }
                       />
-                      <Bar dataKey="shap_value" radius={[5, 5, 5, 5]} isAnimationActive={false}>
+                      <Bar dataKey="chart_value" radius={[5, 5, 5, 5]} isAnimationActive={false}>
                         {chartDrivers.map((item) => (
                           <Cell
                             key={`${item.feature}-${item.direction}`}
-                            fill={item.shap_value >= 0 ? "url(#riskDriverGradient)" : "url(#riskReducerGradient)"}
+                            fill={item.chart_value >= 0 ? "url(#riskDriverGradient)" : "url(#riskReducerGradient)"}
                           />
                         ))}
                       </Bar>
@@ -852,7 +877,7 @@ export default function CrisisWarningTab({
                 </div>
               )}
             </div>
-            <div className="grid min-w-0 gap-5 lg:grid-cols-2">
+            <div className="min-w-0 border-t border-black/[0.08] pt-4 dark:border-white/[0.08] xl:border-l xl:border-t-0 xl:pl-6 xl:pr-6 xl:pt-0 xl:dark:border-white/[0.08]">
               <DriverColumn
                 icon={TrendingUp}
                 title={t(lang, "topRiskDrivers")}
@@ -864,6 +889,8 @@ export default function CrisisWarningTab({
                 maxMagnitude={maxVisibleMagnitude}
                 hiddenCount={hiddenRiskDriverCount}
               />
+            </div>
+            <div className="min-w-0 border-t border-black/[0.08] pt-4 dark:border-white/[0.08] xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0 xl:dark:border-white/[0.08]">
               <DriverColumn
                 icon={TrendingDown}
                 title={t(lang, "riskReducers")}
@@ -880,47 +907,11 @@ export default function CrisisWarningTab({
         </div>
       </Panel>
 
-      <div className="grid items-stretch gap-3 xl:grid-cols-[minmax(0,1.08fr)_minmax(21rem,0.92fr)]">
-        <Panel className="h-full">
-          <div className="p-4 sm:p-5 xl:p-6">
-            <SectionTitle icon={Info} title={t(lang, "crisisHowToRead")} />
-            <div className="grid gap-x-5 sm:grid-cols-2 xl:grid-cols-4">
-              {readoutMetrics.map((metric) => (
-                <ReadingMetric
-                  key={metric.label}
-                  icon={metric.icon}
-                  label={metric.label}
-                  value={metric.value}
-                  detail={metric.detail}
-                  tone={metric.tone}
-                />
-              ))}
-            </div>
-            <div className="mt-2 grid gap-4 lg:grid-cols-3">
-              <ReadingPoint icon={Target} title={t(lang, "targetDefinition")} tone="accent">
-                <p>{localizedTargetDefinition}</p>
-              </ReadingPoint>
-              <ReadingPoint icon={Gauge} title={t(lang, "validationSummary")} tone={confidence.tone}>
-                <p>{confidence.detail}</p>
-              </ReadingPoint>
-              <ReadingPoint icon={AlertTriangle} title={t(lang, "crisisLimitations")} tone="warn">
-                <p>
-                  {byLang(
-                    lang,
-                    "No return forecast. No automatic allocation change.",
-                    "不预测收益，也不自动改配置。",
-                    "不預測收益，也不自動改配置。"
-                  )}
-                </p>
-              </ReadingPoint>
-            </div>
-          </div>
-        </Panel>
-
+      <div className="grid items-stretch gap-3 xl:grid-cols-[minmax(0,0.49fr)_minmax(0,0.51fr)]">
         <Panel className="h-full">
           <div className="p-4 sm:p-5 xl:p-6">
             <SectionTitle icon={ShieldCheck} title={byLang(lang, "Model audit", "模型审计", "模型審計")} />
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <MetricBlock label={t(lang, "modelName")} value={crisisWarning.model_name} detail={crisisWarning.model_version} />
               <MetricBlock label={t(lang, "trainingWindow")} value={windowLabel} />
               <MetricBlock
@@ -939,16 +930,16 @@ export default function CrisisWarningTab({
                 <div className="mb-2 text-[11px] font-semibold uppercase text-df-text-secondary">
                   {t(lang, "diagnosticsWarnings")}
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-col items-start gap-2">
                   {fallbackUsed && (
-                    <span className="rounded-full border border-amber-300/50 bg-amber-400/10 px-2.5 py-1 text-xs leading-relaxed text-amber-700 dark:text-amber-200">
+                    <span className="inline-block max-w-full break-words rounded-full border border-amber-300/50 bg-amber-400/10 px-4 py-2 text-sm leading-relaxed text-amber-700 dark:text-amber-200">
                       {t(lang, "shapFallback")}
                     </span>
                   )}
                   {warnings.map((warning) => (
                     <span
                       key={warning}
-                      className="rounded-full border border-df-border bg-df-surface-solid/20 px-2.5 py-1 text-xs leading-relaxed text-df-text-secondary"
+                      className="inline-block max-w-full break-words rounded-full border border-df-border bg-df-surface-solid/20 px-4 py-2 text-sm leading-relaxed text-df-text-secondary"
                     >
                       {localizeWarning(warning, lang)}
                     </span>
@@ -956,6 +947,42 @@ export default function CrisisWarningTab({
                 </div>
               </div>
             )}
+          </div>
+        </Panel>
+
+        <Panel className="h-full">
+          <div className="p-4 sm:p-5 xl:p-8">
+            <SectionTitle icon={Info} title={t(lang, "crisisHowToRead")} />
+            <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
+              {readoutMetrics.map((metric) => (
+                <ReadingMetric
+                  key={metric.label}
+                  icon={metric.icon}
+                  label={metric.label}
+                  value={metric.value}
+                  detail={metric.detail}
+                  tone={metric.tone}
+                />
+              ))}
+            </div>
+            <div className="mt-8 grid gap-x-8 gap-y-6 lg:grid-cols-3">
+              <ReadingPoint icon={Target} title={t(lang, "targetDefinition")} tone="accent">
+                <p>{localizedTargetDefinition}</p>
+              </ReadingPoint>
+              <ReadingPoint icon={Gauge} title={t(lang, "validationSummary")} tone={confidence.tone}>
+                <p>{confidence.detail}</p>
+              </ReadingPoint>
+              <ReadingPoint icon={AlertTriangle} title={t(lang, "crisisLimitations")} tone="warn">
+                <p>
+                  {byLang(
+                    lang,
+                    "No return forecast. No automatic allocation change.",
+                    "不预测收益，也不自动改配置。",
+                    "不預測收益，也不自動改配置。"
+                  )}
+                </p>
+              </ReadingPoint>
+            </div>
           </div>
         </Panel>
       </div>

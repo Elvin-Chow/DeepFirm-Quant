@@ -3,6 +3,11 @@ export type MarketMode = "us" | "hk" | "cn" | "mixed";
 export type MarketSessionStatus = "open" | "lunch_break" | "closed" | "unknown";
 export type MarketIndexStatus = "ok" | "unavailable";
 
+export interface MarketSnapshotTrendPoint {
+  timestamp: string;
+  price: number;
+}
+
 export interface MarketSnapshotIndex {
   symbol: string;
   name: string;
@@ -16,6 +21,7 @@ export interface MarketSnapshotIndex {
   source_detail: string;
   status: MarketIndexStatus;
   warning: string;
+  trend: MarketSnapshotTrendPoint[];
 }
 
 export interface MarketSnapshotResult {
@@ -82,6 +88,18 @@ export interface RiskEvaluationResult {
   absolute_loss_monte_carlo: number;
   cumulative_returns: number[];
   performance_dates: string[];
+  benchmark_symbol?: string;
+  benchmark_name?: string;
+  benchmark_cumulative_returns?: number[];
+  benchmark_performance_dates?: string[];
+  benchmark_source?: string;
+  benchmark_source_detail?: string;
+  risk_free_symbol?: string;
+  risk_free_name?: string;
+  risk_free_cumulative_returns?: number[];
+  risk_free_performance_dates?: string[];
+  risk_free_source?: string;
+  risk_free_source_detail?: string;
   annualized_volatility: number;
   max_drawdown: number;
   max_drawdown_date: string;

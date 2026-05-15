@@ -79,7 +79,7 @@ export default function HelpTip({ text }: HelpTipProps) {
           event.stopPropagation();
           setOpen((current) => !current);
         }}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-df-border bg-df-surface-solid/40 text-df-text-secondary transition-colors hover:border-df-accent hover:text-df-accent sm:h-5 sm:w-5"
+        className="inline-flex h-7 w-7 -translate-y-px items-center justify-center rounded-full border border-df-border bg-df-surface-solid/40 text-df-text-secondary transition-colors hover:border-df-accent hover:text-df-accent sm:h-5 sm:w-5"
         aria-label="Show help"
         aria-expanded={open}
       >

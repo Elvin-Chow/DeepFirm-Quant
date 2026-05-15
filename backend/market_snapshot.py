@@ -11,7 +11,12 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import requests
 
-from backend.schemas import MarketSnapshotIndex, MarketSnapshotResult, MarketSessionStatus
+from backend.schemas import (
+    MarketSnapshotIndex,
+    MarketSnapshotResult,
+    MarketSnapshotTrendPoint,
+    MarketSessionStatus,
+)
 from data_pipeline import SmartFetcher
 from models.market_validation import MarketMode
 
@@ -144,6 +149,17 @@ def _build_unavailable_index(config: IndexConfig, warning: str) -> MarketSnapsho
     )
 
 
+def _append_fetcher_warning(fetcher: SmartFetcher, message: str) -> None:
+    append_warning = getattr(fetcher, "_append_warning", None)
+    if callable(append_warning):
+        append_warning(message)
+        return
+
+    warnings = getattr(fetcher, "data_warnings", None)
+    if isinstance(warnings, list) and message not in warnings:
+        warnings.append(message)
+
+
 def _fetch_yahoo_chart_meta(
     config: IndexConfig,
     fetcher: SmartFetcher,
@@ -183,6 +199,107 @@ def _fetch_yahoo_chart_meta(
             SmartFetcher._register_yahoo_chart_failure(exc)
             continue
     return {}
+
+
+def _intraday_timeout_seconds() -> float:
+    timeout = getattr(SmartFetcher, "_yahoo_chart_timeout_seconds", lambda: 4.0)()
+    return min(float(timeout), 4.0)
+
+
+def _parse_intraday_trend(result: dict) -> list[MarketSnapshotTrendPoint]:
+    timestamps = result.get("timestamp") or []
+    quote = (result.get("indicators", {}).get("quote") or [{}])[0]
+    closes = quote.get("close") or []
+    if not timestamps or not closes:
+        return []
+
+    timezone_name = (result.get("meta") or {}).get("exchangeTimezoneName")
+    points: list[MarketSnapshotTrendPoint] = []
+    seen_timestamps: set[str] = set()
+    for raw_timestamp, raw_price in zip(timestamps, closes):
+        try:
+            price = float(raw_price)
+            timestamp = datetime.fromtimestamp(float(raw_timestamp), timezone.utc)
+        except (TypeError, ValueError, OverflowError, OSError):
+            continue
+        if not math.isfinite(price):
+            continue
+        if isinstance(timezone_name, str) and timezone_name:
+            try:
+                timestamp = timestamp.astimezone(ZoneInfo(timezone_name))
+            except Exception:
+                timestamp = timestamp.astimezone(timezone.utc)
+        timestamp_text = timestamp.isoformat(timespec="minutes")
+        if timestamp_text in seen_timestamps:
+            continue
+        seen_timestamps.add(timestamp_text)
+        points.append(
+            MarketSnapshotTrendPoint(
+                timestamp=timestamp_text,
+                price=round(price, 4),
+            )
+        )
+    return points
+
+
+def _fetch_yahoo_intraday_trend(
+    config: IndexConfig,
+    fetcher: SmartFetcher,
+) -> list[MarketSnapshotTrendPoint]:
+    session = getattr(fetcher, "_session", None)
+    if session is None:
+        return []
+
+    normalize_symbol = getattr(fetcher, "_normalize_yf_symbol", lambda symbol: symbol)
+    yf_symbol = normalize_symbol(config.symbol)
+    params = {
+        "range": "1d",
+        "interval": "5m",
+        "includePrePost": "false",
+        "events": "history",
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json,text/plain,*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Connection": "close",
+    }
+    provider_errors: list[str] = []
+
+    for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
+        url = f"https://{host}/v8/finance/chart/{yf_symbol}"
+        try:
+            SmartFetcher._respect_yahoo_spacing()
+            response = session.get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=_intraday_timeout_seconds(),
+            )
+            SmartFetcher._yf_last_call_time = datetime.now(timezone.utc).timestamp()
+            response.raise_for_status()
+            payload = response.json()
+            chart = payload.get("chart", {})
+            error = chart.get("error")
+            if error:
+                raise RuntimeError(str(error.get("description") or error))
+            results = chart.get("result") or []
+            if not results:
+                raise RuntimeError("empty Yahoo chart response")
+            points = _parse_intraday_trend(results[0])
+            if len(points) >= 3:
+                return points
+            raise RuntimeError("Yahoo chart response has insufficient intraday points")
+        except Exception as exc:
+            SmartFetcher._register_yahoo_chart_failure(exc)
+            provider_errors.append(f"{host}: {exc}")
+
+    warning_detail = provider_errors[-1] if provider_errors else "no provider response"
+    _append_fetcher_warning(
+        fetcher,
+        f"{config.symbol}: intraday trend unavailable from Yahoo Finance chart API ({warning_detail})",
+    )
+    return []
 
 
 def _meta_number(meta: dict, key: str) -> float | None:
@@ -228,6 +345,7 @@ def _build_index_snapshot(
     force_refresh: bool = False,
 ) -> MarketSnapshotIndex:
     try:
+        trend = _fetch_yahoo_intraday_trend(config, fetcher)
         response = fetcher.fetch_us_equity(config.symbol, start_date, end_date)
         frame = _normalize_quote_frame(response.data)
         if frame.empty:
@@ -276,6 +394,7 @@ def _build_index_snapshot(
             source=source,
             source_detail=source_detail,
             status="ok",
+            trend=trend,
         )
     except Exception as exc:
         return _build_unavailable_index(config, str(exc))

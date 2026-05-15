@@ -9,11 +9,18 @@ export class ApiError extends Error {
 
 const DEFAULT_GET_TIMEOUT_MS = 45_000;
 const DEFAULT_POST_TIMEOUT_MS = 240_000;
+const DEFAULT_HEALTH_TIMEOUT_MS = 2_500;
 
 function requestTimeoutMs(defaultTimeoutMs: number): number {
   const rawValue = process.env.NEXT_PUBLIC_API_TIMEOUT_MS;
   const parsed = rawValue ? Number(rawValue) : defaultTimeoutMs;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultTimeoutMs;
+}
+
+function healthTimeoutMs(): number {
+  const rawValue = process.env.NEXT_PUBLIC_API_HEALTH_TIMEOUT_MS;
+  const parsed = rawValue ? Number(rawValue) : DEFAULT_HEALTH_TIMEOUT_MS;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_HEALTH_TIMEOUT_MS;
 }
 
 function isAbortError(error: unknown): boolean {
@@ -132,4 +139,27 @@ export async function getApi<T>(endpoint: string, signal?: AbortSignal): Promise
   }
 
   return response.json() as Promise<T>;
+}
+
+export async function checkApiHealth(signal?: AbortSignal): Promise<void> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/health?_ts=${Date.now()}`,
+    {
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+      },
+    },
+    healthTimeoutMs(),
+    signal
+  );
+
+  if (!response.ok) {
+    throw await parseResponseError(response);
+  }
+
+  const payload = await response.json().catch(() => null) as { status?: unknown } | null;
+  if (payload?.status !== "ok") {
+    throw new ApiError(502, "Backend health response is not ok.");
+  }
 }

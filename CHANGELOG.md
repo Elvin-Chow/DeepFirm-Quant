@@ -4,6 +4,22 @@ All notable changes to the DeepFirm Quant project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [V4.0.0] - 2026-05-15
+
+### Backend
+- Added intraday trend points to market snapshot index responses, backed by Yahoo Finance chart data with bounded timeouts, host fallback, duplicate timestamp filtering, and provider warnings.
+- Added non-blocking US risk comparison series to risk evaluation and unified analysis, including S&P 500 cumulative returns, risk-free proxy returns, performance dates, source details, and data warnings.
+- Expanded typed API contracts for market snapshot trend data and risk benchmark/risk-free provenance so the frontend can render comparison charts without ad hoc payload handling.
+- Updated FastAPI metadata to version `4.0.0`.
+
+### Frontend
+- Rebuilt the app shell with a compact sticky header, backend health heartbeat, market selector, mobile-safe tab navigation, and per-market snapshot refresh persistence.
+- Redesigned the Welcome page into a live market command dashboard with intraday index cards, breadth summary, data provenance, market status, backend status, and collapsible V4.0.0 release notes.
+- Reworked the Risk page around portfolio, benchmark, and risk-free return comparison, including range controls, endpoint labels, a mini navigator, compact metrics, risk-state panels, and a denser correlation heatmap.
+- Refined the Decision, Machine Learning, Crisis Warning, and Report pages with tighter alignment, clearer chart hierarchy, evidence legends, cleaner report colors, and more scan-friendly metric cards.
+- Added a major UI refresh across the frontend, with a cleaner graphite, blue, and teal look, tighter chart layouts, and dashboard screens that are easier to scan.
+- Updated frontend release notes and package metadata to version `4.0.0`.
+
 ## [V3.6.0] - 2026-05-13
 
 ### Backend

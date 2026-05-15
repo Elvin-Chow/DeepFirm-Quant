@@ -16,8 +16,8 @@ export default function GlassCard({
   return (
     <div
       className={`
-        glass-card p-4 sm:p-6 hover-lift
-        ${accent ? "border-l-4 border-l-df-accent" : ""}
+        glass-card p-4 hover-lift sm:p-5
+        ${accent ? "border-l-2 border-l-df-accent" : ""}
         ${className}
       `}
       style={style}

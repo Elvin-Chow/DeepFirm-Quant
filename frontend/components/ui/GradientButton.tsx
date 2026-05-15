@@ -16,12 +16,12 @@ export default function GradientButton({
   type = "button",
 }: GradientButtonProps) {
   const base =
-    "min-h-11 w-full rounded-full px-4 py-3 text-sm font-semibold transition-all click-press";
+    "min-h-10 w-full rounded-md px-4 py-2.5 text-sm font-semibold transition-all click-press";
 
   const styles =
     variant === "primary"
-      ? "bg-gradient-to-r from-df-accent to-df-accent-secondary text-white shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
-      : "bg-df-surface border border-df-border text-df-text hover:bg-df-surface-solid disabled:opacity-50 disabled:cursor-not-allowed";
+      ? "bg-gradient-to-r from-df-accent to-df-accent-dim text-white shadow-[0_14px_32px_-18px_rgba(79,109,255,0.8)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+      : "border border-df-border bg-df-surface text-df-text hover:bg-df-surface-solid disabled:cursor-not-allowed disabled:opacity-50";
 
   return (
     <button

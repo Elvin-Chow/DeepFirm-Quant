@@ -6,16 +6,21 @@ import {
   AlertTriangle,
   BarChart3,
   BookOpen,
+  CheckCircle2,
   ChevronDown,
-  ChevronRight,
   Clock3,
   RefreshCw,
-  Sparkles,
+  Shield,
   Wifi,
 } from "lucide-react";
 import { getApi } from "@/hooks/useApi";
 import { t, Lang } from "@/lib/i18n";
-import { MarketMode, MarketSnapshotIndex, MarketSnapshotResult, MarketSessionStatus } from "@/types/api";
+import {
+  MarketMode,
+  MarketSnapshotIndex,
+  MarketSnapshotResult,
+  MarketSessionStatus,
+} from "@/types/api";
 
 interface ChangelogEntry {
   version: string;
@@ -30,6 +35,60 @@ const changelogTypeOrder: Record<ChangelogEntry["items"][number]["type"], number
 };
 
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "V4.0.0",
+    date: "2026-05-15",
+    items: [
+      {
+        type: "added",
+        text: {
+          en: "Backend market snapshots now include intraday trend points with bounded Yahoo chart fetches, host fallback, duplicate timestamp filtering, and provider warnings.",
+          zh: "后端市场快照现在返回日内趋势点，并对 Yahoo 图表抓取加入超时边界、主机回退、重复时间过滤与供应商告警。",
+          tc: "後端市場快照現在返回日內趨勢點，並對 Yahoo 圖表抓取加入逾時邊界、主機回退、重複時間過濾與供應商告警。",
+        },
+      },
+      {
+        type: "added",
+        text: {
+          en: "US risk results now include S&P 500 and risk-free proxy comparison curves with dates, source details, and non-blocking warning propagation.",
+          zh: "美股风险结果现在包含 S&P 500 与无风险代理对比曲线，并返回日期、来源细节和非阻塞式告警。",
+          tc: "美股風險結果現在包含 S&P 500 與無風險代理對比曲線，並返回日期、來源細節和非阻塞式告警。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "The app shell now uses a compact sticky header with backend health, market switching, persisted snapshot refresh timing, and mobile-safe navigation.",
+          zh: "应用外壳改为紧凑固定顶部栏，集成后端健康状态、市场切换、快照刷新时间持久化和移动端安全导航。",
+          tc: "應用外殼改為緊湊固定頂部欄，整合後端健康狀態、市場切換、快照刷新時間持久化和行動端安全導航。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "The Welcome page now presents a live market command dashboard with intraday index tiles, breadth, data provenance, market status, and backend status.",
+          zh: "欢迎页升级为实时市场指挥台，展示日内指数卡片、涨跌分布、数据来源、市场状态与后端状态。",
+          tc: "歡迎頁升級為即時市場指揮台，展示日內指數卡片、漲跌分佈、資料來源、市場狀態與後端狀態。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "Risk, Decision, Machine Learning, Crisis Warning, and Report views were tightened with clearer comparison charts, evidence legends, report colors, and metric hierarchy.",
+          zh: "风险、决策、机器学习、危机预警和报告视图完成收紧，强化对比图表、证据图例、报告配色和指标层级。",
+          tc: "風險、決策、機器學習、危機預警和報告視圖完成收緊，強化對比圖表、證據圖例、報告配色和指標層級。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "Major UI refresh across the frontend with a cleaner graphite, blue, and teal look, tighter chart layouts, and dashboard screens that are easier to scan.",
+          zh: "前端UI大幅美化：调整为石墨黑、蓝色与青绿色视觉风格，界面更清爽，图表和指标信息更集中，提升阅读体验。",
+          tc: "前端UI大幅美化：調整為石墨黑、藍色與青綠色視覺風格，介面更清爽，圖表和指標資訊更集中，提升閱讀體驗。",
+        },
+      },
+    ],
+  },
   {
     version: "V3.6.0",
     date: "2026-05-13",
@@ -576,12 +635,12 @@ const CHANGELOG: ChangelogEntry[] = [
 
 function Badge({ type, lang }: { type: ChangelogEntry["items"][0]["type"]; lang: Lang }) {
   const styles = {
-    added: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-    changed: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
-    fixed: "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
+    added: "bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/30",
+    changed: "bg-amber-500/10 text-amber-500 dark:text-amber-400 border-amber-500/30",
+    fixed: "bg-sky-500/10 text-sky-500 dark:text-sky-400 border-sky-500/30",
   };
   return (
-    <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md border shrink-0 ${styles[type]}`}>
+    <span className={`inline-flex h-[23px] min-w-[50px] shrink-0 items-center justify-center rounded-md border px-2 text-[10px] font-bold uppercase tracking-[0.04em] sm:h-6 sm:min-w-[58px] sm:text-[11px] ${styles[type]}`}>
       {t(lang, type)}
     </span>
   );
@@ -590,7 +649,17 @@ function Badge({ type, lang }: { type: ChangelogEntry["items"][0]["type"]; lang:
 const MARKET_PANEL_COPY = {
   en: {
     marketStatus: "Market Status",
+    marketStatusTitle: "MARKET STATUS",
+    changelog: "Changelog",
     dailyBrief: "Today's Market Brief",
+    marketIntelligence: "Breadth Distribution",
+    breadth: "Breadth",
+    breadthUp: "Up",
+    breadthDown: "Down",
+    breadthFlat: "Flat",
+    breadthBias: "Bias",
+    noBreadthData: "No data",
+    snapshotDerived: "Snapshot-derived",
     majorIndices: "Major Indices",
     recentUpdates: "Recent Updates",
     refresh: "Refresh market snapshot",
@@ -601,7 +670,18 @@ const MARKET_PANEL_COPY = {
     unavailable: "Market data is temporarily unavailable.",
     updated: "Updated",
     dataSource: "Source",
+    dataProvenance: "Data Source",
+    primarySource: "Primary",
+    sourceCoverage: "Coverage",
+    providerCount: "Providers",
+    trackedIndices: "Tracked indices",
+    refreshedAt: "Refreshed",
+    sourceReady: "Ready",
+    sourceWarnings: "Warnings",
+    noActiveProvider: "No active provider",
+    dataNoticeCount: "Data notices",
     dataDelayNote: "Market data may be delayed or adjusted by the data provider.",
+    trendUnavailable: "Intraday trend is temporarily unavailable.",
     localTime: "Local time",
     asOf: "As of",
     sessionOpen: "Open",
@@ -612,10 +692,27 @@ const MARKET_PANEL_COPY = {
     sessionHintLunch: "Market is in the midday break; moves reflect the latest traded level before the pause.",
     sessionHintClosed: "Market is closed; moves reflect the latest available close or delayed provider update.",
     noBrief: "The system cannot form a reliable brief until at least one index returns usable prices.",
+    sessionStatusLabel: "Session",
+    marketToneLabel: "Tone",
+    volatilityRegimeLabel: "Volatility",
+    dataNoticesLabel: "Data Notices",
+    latestQuoteLabel: "Latest Quote",
+    backendRefreshed: "Refreshed",
+    noActiveDataWarnings: "No active data warnings",
   },
   zh: {
     marketStatus: "市场状态",
+    marketStatusTitle: "MARKET STATUS",
+    changelog: "更新日志",
     dailyBrief: "今日大盘简析",
+    marketIntelligence: "涨跌分布",
+    breadth: "涨跌分布",
+    breadthUp: "上涨",
+    breadthDown: "下跌",
+    breadthFlat: "持平",
+    breadthBias: "倾向",
+    noBreadthData: "无数据",
+    snapshotDerived: "快照派生",
     majorIndices: "主要指数",
     recentUpdates: "最近更新",
     refresh: "刷新市场快照",
@@ -626,7 +723,18 @@ const MARKET_PANEL_COPY = {
     unavailable: "市场数据暂时不可用。",
     updated: "更新时间",
     dataSource: "数据来源",
+    dataProvenance: "数据来源",
+    primarySource: "主来源",
+    sourceCoverage: "覆盖率",
+    providerCount: "来源数",
+    trackedIndices: "跟踪指数",
+    refreshedAt: "刷新时间",
+    sourceReady: "可用",
+    sourceWarnings: "有提示",
+    noActiveProvider: "暂无有效来源",
+    dataNoticeCount: "数据提示",
     dataDelayNote: "市场数据可能存在延迟，具体以数据源返回为准。",
+    trendUnavailable: "当日走势图暂时不可用。",
     localTime: "当地时间",
     asOf: "截至",
     sessionOpen: "交易中",
@@ -637,10 +745,27 @@ const MARKET_PANEL_COPY = {
     sessionHintLunch: "当前处于午间休市，涨跌反映暂停前的最新交易水平。",
     sessionHintClosed: "当前市场已收市，涨跌反映最新可用收盘或延迟行情。",
     noBrief: "至少需要一个指数返回有效价格后，系统才能生成可靠简析。",
+    sessionStatusLabel: "交易状态",
+    marketToneLabel: "市场温度",
+    volatilityRegimeLabel: "波动状态",
+    dataNoticesLabel: "数据提示",
+    latestQuoteLabel: "最新行情",
+    backendRefreshed: "后端刷新",
+    noActiveDataWarnings: "无活跃数据提示",
   },
   tc: {
     marketStatus: "市場狀態",
+    marketStatusTitle: "MARKET STATUS",
+    changelog: "更新日誌",
     dailyBrief: "今日大盤簡析",
+    marketIntelligence: "漲跌分布",
+    breadth: "漲跌分布",
+    breadthUp: "上漲",
+    breadthDown: "下跌",
+    breadthFlat: "持平",
+    breadthBias: "傾向",
+    noBreadthData: "無資料",
+    snapshotDerived: "快照衍生",
     majorIndices: "主要指數",
     recentUpdates: "最近更新",
     refresh: "刷新市場快照",
@@ -651,7 +776,18 @@ const MARKET_PANEL_COPY = {
     unavailable: "市場資料暫時不可用。",
     updated: "更新時間",
     dataSource: "資料來源",
+    dataProvenance: "資料來源",
+    primarySource: "主來源",
+    sourceCoverage: "覆蓋率",
+    providerCount: "來源數",
+    trackedIndices: "跟蹤指數",
+    refreshedAt: "刷新時間",
+    sourceReady: "可用",
+    sourceWarnings: "有提示",
+    noActiveProvider: "暫無有效來源",
+    dataNoticeCount: "資料提示",
     dataDelayNote: "市場資料可能存在延遲，具體以資料源返回為準。",
+    trendUnavailable: "當日走勢圖暫時不可用。",
     localTime: "當地時間",
     asOf: "截至",
     sessionOpen: "交易中",
@@ -662,6 +798,13 @@ const MARKET_PANEL_COPY = {
     sessionHintLunch: "目前處於午間休市，漲跌反映暫停前的最新交易水平。",
     sessionHintClosed: "目前市場已收市，漲跌反映最新可用收盤或延遲行情。",
     noBrief: "至少需要一個指數返回有效價格後，系統才能生成可靠簡析。",
+    sessionStatusLabel: "交易狀態",
+    marketToneLabel: "市場溫度",
+    volatilityRegimeLabel: "波動狀態",
+    dataNoticesLabel: "資料提示",
+    latestQuoteLabel: "最新行情",
+    backendRefreshed: "後端刷新",
+    noActiveDataWarnings: "無活躍資料提示",
   },
 } as const;
 
@@ -676,13 +819,6 @@ type MarketPanelCopyKey = keyof typeof MARKET_PANEL_COPY.en;
 
 function panelText(lang: Lang, key: MarketPanelCopyKey): string {
   return MARKET_PANEL_COPY[lang][key] || MARKET_PANEL_COPY.en[key];
-}
-
-function localeForLang(lang: Lang): string {
-  if (lang === "en") {
-    return "en-US";
-  }
-  return lang === "tc" ? "zh-HK" : "zh-CN";
 }
 
 function getIndexName(index: MarketSnapshotIndex, lang: Lang): string {
@@ -721,31 +857,11 @@ function formatPercent(value: number | null): string {
   return `${prefix}${value.toFixed(2)}%`;
 }
 
-function formatDateTime(value: string | null | undefined, lang: Lang, includeSeconds = false): string {
-  if (!value) {
-    return "--";
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
   }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat(localeForLang(lang), {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    ...(includeSeconds ? { second: "2-digit" as const } : {}),
-  }).format(parsed);
-}
-
-function formatLocalTime(value: string | null | undefined, lang: Lang): string {
-  if (!value) {
-    return "--";
-  }
-  if (value.includes(" / ")) {
-    return value;
-  }
-  return formatDateTime(value, lang);
+  return Math.max(0, Math.min(100, value));
 }
 
 function formatSourceLabel(value: string | null | undefined, lang: Lang): string {
@@ -777,6 +893,16 @@ function sessionLabel(status: MarketSessionStatus, lang: Lang): string {
   return panelText(lang, "sessionUnknown");
 }
 
+function sessionStatusClass(status: MarketSessionStatus | undefined): string {
+  if (status === "open") {
+    return "text-emerald-300";
+  }
+  if (status === "lunch_break" || status === "closed") {
+    return "text-amber-300";
+  }
+  return "text-df-text-secondary";
+}
+
 function sessionHint(status: MarketSessionStatus, lang: Lang): string {
   if (status === "open") {
     return panelText(lang, "sessionHintOpen");
@@ -785,19 +911,6 @@ function sessionHint(status: MarketSessionStatus, lang: Lang): string {
     return panelText(lang, "sessionHintLunch");
   }
   return panelText(lang, "sessionHintClosed");
-}
-
-function sessionStyle(status: MarketSessionStatus): string {
-  if (status === "open") {
-    return "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300";
-  }
-  if (status === "lunch_break") {
-    return "border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-300";
-  }
-  if (status === "closed") {
-    return "border-stone-500/20 bg-stone-500/10 text-stone-600 dark:text-stone-300";
-  }
-  return "border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-300";
 }
 
 function changeStyle(value: number | null): string {
@@ -979,6 +1092,254 @@ function summarizeIndices(snapshot: MarketSnapshotResult | null) {
   };
 }
 
+type DashboardTone = "positive" | "negative";
+
+function sparklinePoints(values: number[], width: number, height: number): string {
+  const finiteValues = values.filter((value) => Number.isFinite(value));
+  if (finiteValues.length === 0) {
+    return "";
+  }
+  const min = Math.min(...finiteValues);
+  const max = Math.max(...finiteValues);
+  const range = max - min || 1;
+  return values
+    .map((value, index) => {
+      const x = (index / Math.max(values.length - 1, 1)) * width;
+      const y = height - ((value - min) / range) * (height - 6) - 3;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+}
+
+function formatFullHktTimestamp(value: string | null | undefined): string {
+  if (!value) {
+    return "--";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Hong_Kong",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(parsed);
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "00";
+  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}:${part("second")} HKT`;
+}
+
+function latestIndexAsOf(snapshot: MarketSnapshotResult | null): string {
+  const values = snapshot?.indices
+    .filter((index) => index.status === "ok" && Boolean(index.asof_date))
+    .map((index) => index.asof_date as string) ?? [];
+  if (!values.length) {
+    return "--";
+  }
+  const sortedValues = [...values].sort((a, b) => a.localeCompare(b));
+  return sortedValues[sortedValues.length - 1] ?? "--";
+}
+
+function changeTone(value: number): DashboardTone {
+  return value < 0 ? "negative" : "positive";
+}
+
+function DashboardSparkline({
+  values,
+  tone = "positive",
+  height = 42,
+}: {
+  values: number[];
+  tone?: DashboardTone;
+  height?: number;
+}) {
+  const points = sparklinePoints(values, 210, height);
+  const color = tone === "negative" ? "#ff4c61" : "#48d486";
+  const fill = tone === "negative" ? "rgba(255,76,97,0.13)" : "rgba(72,212,134,0.14)";
+  const areaPoints = points ? `0,${height} ${points} 210,${height}` : "";
+  return (
+    <svg viewBox={`0 0 210 ${height}`} className="h-full w-full" preserveAspectRatio="none" aria-hidden="true">
+      <polygon points={areaPoints} fill={fill} />
+      <polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+      />
+    </svg>
+  );
+}
+
+function DashboardIndexCard({ index, lang }: { index: MarketSnapshotIndex; lang: Lang }) {
+  const changePercent = typeof index.change_percent === "number" && Number.isFinite(index.change_percent)
+    ? index.change_percent
+    : null;
+  const tone = changeTone(changePercent ?? 0);
+  const positive = tone === "positive";
+  const trendPoints = Array.isArray(index.trend) ? index.trend : [];
+  const series = trendPoints
+    .map((point) => point.price)
+    .filter((value) => typeof value === "number" && Number.isFinite(value));
+  const source = formatSourceLabel(index.source_detail || index.source, lang);
+
+  return (
+    <article className="glass-card min-h-[232px] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-[15px] font-semibold text-df-text">{getIndexName(index, lang)}</h3>
+          <div className="mt-3 font-mono text-[28px] font-semibold leading-none tracking-normal text-df-text">
+            {formatNumber(index.price)}
+          </div>
+          <div className={`mt-2 font-mono text-base font-semibold ${positive ? "text-emerald-300" : "text-rose-400"}`}>
+            {formatPercent(index.change_percent)}
+          </div>
+        </div>
+        <span className="font-mono text-xs text-df-text-secondary">{index.symbol}</span>
+      </div>
+      <div className="mt-3 h-[68px]">
+        {index.status === "ok" && series.length >= 3 ? (
+          <DashboardSparkline values={series} tone={tone} height={58} />
+        ) : (
+          <div className="flex h-full items-center rounded border border-df-border/50 bg-df-surface-solid/20 px-2 text-xs text-df-text-secondary">
+            {index.status === "ok" ? panelText(lang, "trendUnavailable") : index.warning || panelText(lang, "unavailable")}
+          </div>
+        )}
+      </div>
+      <div className="mt-3 flex items-center justify-between border-t border-df-border/60 pt-3 text-xs text-df-text-secondary">
+        <span>{index.asof_date || "--"}</span>
+        <span className="truncate text-right">{source}</span>
+      </div>
+    </article>
+  );
+}
+
+function sourceDistribution(snapshot: MarketSnapshotResult | null): { label: string; pct: number; color: string }[] {
+  const colorScale = ["bg-blue-400", "bg-sky-400", "bg-amber-400", "bg-violet-400", "bg-rose-300"];
+  const counts = new Map<string, number>();
+  const indices = snapshot?.indices.filter((item) => item.status === "ok") ?? [];
+  for (const index of indices) {
+    const label = formatSourceLabel(index.source_detail || index.source, "en");
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  const total = indices.length || 1;
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, count], index) => ({
+      label,
+      pct: Math.round((count / total) * 100),
+      color: colorScale[index % colorScale.length],
+    }));
+}
+
+function marketToneLabel(average: number | null): { label: string; className: string } {
+  if (average === null) {
+    return { label: "Unavailable", className: "text-df-text-secondary" };
+  }
+  if (average > 0.25) {
+    return { label: "Risk-on", className: "text-emerald-300" };
+  }
+  if (average < -0.25) {
+    return { label: "Defensive", className: "text-rose-400" };
+  }
+  return { label: "Mixed", className: "text-blue-300" };
+}
+
+function volatilityRegimeLabel(snapshot: MarketSnapshotResult | null): { label: string; className: string } {
+  const changes = snapshot?.indices
+    .map((index) => index.change_percent)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value)) ?? [];
+  if (changes.length === 0) {
+    return { label: "Unavailable", className: "text-df-text-secondary" };
+  }
+  const spread = Math.max(...changes) - Math.min(...changes);
+  if (spread >= 2.5) {
+    return { label: "High Volatility", className: "text-amber-400" };
+  }
+  return { label: "Normal", className: "text-blue-300" };
+}
+
+function sourceHealthLabel(snapshot: MarketSnapshotResult | null, lang: Lang): { label: string; className: string } {
+  if (!snapshot) {
+    return { label: panelText(lang, "unavailable"), className: "text-df-text-secondary" };
+  }
+  if ((snapshot.data_warnings?.length ?? 0) > 0) {
+    return { label: panelText(lang, "sourceWarnings"), className: "text-amber-300" };
+  }
+  return { label: panelText(lang, "sourceReady"), className: "text-blue-300" };
+}
+
+function snapshotChangeSpread(snapshot: MarketSnapshotResult | null): number | null {
+  const changes = snapshot?.indices
+    .map((index) => index.change_percent)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value)) ?? [];
+  if (changes.length === 0) {
+    return null;
+  }
+  return Math.max(...changes) - Math.min(...changes);
+}
+
+type BreadthSlice = {
+  key: string;
+  label: string;
+  count: number;
+  pct: number;
+  color: string;
+  textClass: string;
+};
+
+function breadthGradient(slices: BreadthSlice[]): string {
+  if (slices.every((slice) => slice.count === 0)) {
+    return "conic-gradient(rgba(143,160,183,0.22) 0 100%)";
+  }
+  let cursor = 0;
+  const stops = slices
+    .filter((slice) => slice.count > 0)
+    .map((slice) => {
+      const start = cursor;
+      cursor += slice.pct;
+      return `${slice.color} ${start}% ${cursor}%`;
+    });
+  if (cursor < 100) {
+    stops.push(`rgba(143,160,183,0.18) ${cursor}% 100%`);
+  }
+  return `conic-gradient(${stops.join(", ")})`;
+}
+
+function BreadthDonut({
+  slices,
+  total,
+  noDataLabel,
+}: {
+  slices: BreadthSlice[];
+  total: number;
+  noDataLabel: string;
+}) {
+  const dominant = slices.reduce(
+    (best, slice) => (slice.count > best.count ? slice : best),
+    slices[0],
+  );
+  const hasData = total > 0 && slices.some((slice) => slice.count > 0);
+  return (
+    <div
+      className="relative flex h-[116px] w-[116px] shrink-0 items-center justify-center rounded-full"
+      style={{ background: breadthGradient(slices) }}
+    >
+      <div className="flex h-[78px] w-[78px] flex-col items-center justify-center rounded-full border border-df-border bg-white shadow-[inset_0_0_20px_rgba(15,23,42,0.08)] dark:bg-[rgba(16,19,20,0.9)] dark:shadow-[inset_0_0_22px_rgba(0,0,0,0.42)]">
+        <span className={`font-mono text-[24px] font-semibold leading-none ${hasData ? dominant.textClass : "text-df-text-secondary"}`}>
+          {hasData ? dominant.count : "--"}
+        </span>
+        <span className="mt-1 text-[10px] font-medium text-df-text-secondary">{hasData ? dominant.label : noDataLabel}</span>
+      </div>
+    </div>
+  );
+}
+
 interface WelcomeTabProps {
   lang: Lang;
   market: MarketMode;
@@ -986,7 +1347,7 @@ interface WelcomeTabProps {
   shouldAutoRefresh: boolean;
   cachedSnapshot: MarketSnapshotResult | null;
   onSnapshotChange: (snapshot: MarketSnapshotResult) => void;
-  onAutoRefreshComplete: (market: MarketMode) => void;
+  onSnapshotRefreshComplete: (market: MarketMode) => void;
 }
 
 export default function WelcomeTab({
@@ -996,7 +1357,7 @@ export default function WelcomeTab({
   shouldAutoRefresh,
   cachedSnapshot,
   onSnapshotChange,
-  onAutoRefreshComplete,
+  onSnapshotRefreshComplete,
 }: WelcomeTabProps) {
   const cachedSnapshotForMarket = cachedSnapshot?.market === market ? cachedSnapshot : null;
   const [snapshot, setSnapshot] = useState<MarketSnapshotResult | null>(cachedSnapshotForMarket);
@@ -1022,20 +1383,22 @@ export default function WelcomeTab({
           signal,
         );
         if (signal?.aborted || requestId !== snapshotRequestIdRef.current) {
-          return;
+          return false;
         }
         setSnapshot(nextSnapshot);
         onSnapshotChange(nextSnapshot);
         setError(null);
+        return true;
       } catch (err) {
         if (
           signal?.aborted ||
           requestId !== snapshotRequestIdRef.current ||
           (err instanceof DOMException && err.name === "AbortError")
         ) {
-          return;
+          return false;
         }
         setError(err instanceof Error ? err.message : panelText(lang, "unavailable"));
+        return false;
       } finally {
         if (showLoader && !signal?.aborted && requestId === snapshotRequestIdRef.current) {
           setLoading(false);
@@ -1053,53 +1416,19 @@ export default function WelcomeTab({
     setRefreshing(true);
     const startedAt = Date.now();
     try {
-      await loadSnapshot(undefined, false, true);
+      const refreshed = await loadSnapshot(undefined, false, true);
+      if (refreshed) {
+        onSnapshotRefreshComplete(market);
+      }
     } finally {
       const remainingMs = Math.max(0, 600 - (Date.now() - startedAt));
       window.setTimeout(() => {
         setRefreshing(false);
       }, remainingMs);
     }
-  }, [loadSnapshot, loading, refreshing]);
+  }, [loadSnapshot, loading, market, onSnapshotRefreshComplete, refreshing]);
 
-  useEffect(() => {
-    if (!snapshotsReady) {
-      return undefined;
-    }
-
-    const controller = new AbortController();
-    setSnapshot(cachedSnapshotForMarket);
-    setError(null);
-    if (shouldAutoRefresh) {
-      void loadSnapshot(controller.signal, !cachedSnapshotForMarket, true).finally(() => {
-        if (!controller.signal.aborted) {
-          onAutoRefreshComplete(market);
-        }
-      });
-    } else if (cachedSnapshotForMarket) {
-      setLoading(false);
-    } else {
-      void loadSnapshot(controller.signal, true, true);
-    }
-    const refreshId = window.setInterval(() => {
-      void loadSnapshot(undefined, false, true);
-    }, 60_000);
-
-    return () => {
-      controller.abort();
-      window.clearInterval(refreshId);
-    };
-  }, [
-    loadSnapshot,
-    market,
-    onAutoRefreshComplete,
-    shouldAutoRefresh,
-    snapshotsReady,
-  ]);
-
-  const brief = useMemo(() => buildMarketBrief(snapshot, lang), [snapshot, lang]);
-  const summary = useMemo(() => summarizeIndices(snapshot), [snapshot]);
-  const toggleVersion = useCallback((version: string) => {
+  const toggleChangelogVersion = useCallback((version: string) => {
     setExpandedVersions((current) => {
       const next = new Set(current);
       if (next.has(version)) {
@@ -1111,221 +1440,330 @@ export default function WelcomeTab({
     });
   }, []);
 
+  useEffect(() => {
+    if (!snapshotsReady) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setSnapshot(cachedSnapshotForMarket);
+    setError(null);
+    if (shouldAutoRefresh) {
+      void loadSnapshot(controller.signal, true, true).then((refreshed) => {
+        if (!controller.signal.aborted && refreshed) {
+          onSnapshotRefreshComplete(market);
+        }
+      });
+    } else if (cachedSnapshotForMarket) {
+      setLoading(false);
+    } else {
+      setLoading(false);
+    }
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    cachedSnapshotForMarket,
+    loadSnapshot,
+    market,
+    onSnapshotRefreshComplete,
+    shouldAutoRefresh,
+    snapshotsReady,
+  ]);
+
+  const brief = useMemo(() => buildMarketBrief(snapshot, lang), [snapshot, lang]);
+  const summary = useMemo(() => summarizeIndices(snapshot), [snapshot]);
+  const dashboardIndices = snapshot?.indices ?? [];
+  const sourceRows = sourceDistribution(snapshot);
+  const primarySourcePct = sourceRows[0]?.pct ?? 0;
+  const primarySourceLabel = sourceRows[0]?.label ?? panelText(lang, "noActiveProvider");
+  const sourceHealth = sourceHealthLabel(snapshot, lang);
+  const tone = marketToneLabel(summary.average);
+  const volatility = volatilityRegimeLabel(snapshot);
+  const dailyNotice = snapshot?.data_warnings?.[0] || panelText(lang, "noActiveDataWarnings");
+  const latestUpdated = formatFullHktTimestamp(snapshot?.updated_at);
+  const compactUpdated = latestUpdated.replace(" HKT", "");
+  const latestQuoteAsOf = latestIndexAsOf(snapshot);
+  const briefDate = latestQuoteAsOf !== "--"
+    ? latestQuoteAsOf.slice(0, 10)
+    : latestUpdated === "--"
+      ? "--"
+      : latestUpdated.slice(0, 10);
+  const sessionStatusText = snapshot
+    ? `${MARKET_LABELS[snapshot.market][lang]} ${sessionLabel(snapshot.session_status, lang)}`
+    : panelText(lang, "unavailable");
+  const statusRows = [
+    { icon: Activity, label: panelText(lang, "sessionStatusLabel"), value: sessionStatusText, color: sessionStatusClass(snapshot?.session_status) },
+    { icon: BarChart3, label: panelText(lang, "marketToneLabel"), value: tone.label, color: tone.className },
+    { icon: Shield, label: panelText(lang, "volatilityRegimeLabel"), value: volatility.label, color: volatility.className },
+    { icon: AlertTriangle, label: panelText(lang, "dataNoticesLabel"), value: dailyNotice, color: snapshot?.data_warnings?.length ? "text-amber-400" : "text-blue-300" },
+    { icon: Clock3, label: panelText(lang, "latestQuoteLabel"), value: latestQuoteAsOf, color: "text-df-text-secondary" },
+    { icon: RefreshCw, label: panelText(lang, "backendRefreshed"), value: compactUpdated, color: "text-df-text-secondary" },
+  ];
+  const breadthTotal = Math.max(summary.up + summary.down + summary.flat, 1);
+  const upShare = (summary.up / breadthTotal) * 100;
+  const downShare = (summary.down / breadthTotal) * 100;
+  const flatShare = (summary.flat / breadthTotal) * 100;
+  const breadthSlices: BreadthSlice[] = [
+    { key: "up", label: panelText(lang, "breadthUp"), count: summary.up, pct: upShare, color: "#60a5fa", textClass: "text-blue-300" },
+    { key: "down", label: panelText(lang, "breadthDown"), count: summary.down, pct: downShare, color: "#fb7185", textClass: "text-rose-300" },
+    { key: "flat", label: panelText(lang, "breadthFlat"), count: summary.flat, pct: flatShare, color: "#94a3b8", textClass: "text-slate-300" },
+  ];
+  const breadthBias = breadthSlices.reduce((best, slice) => (slice.count > best.count ? slice : best), breadthSlices[0]);
+  const spread = snapshotChangeSpread(snapshot);
+
   return (
-    <div className="space-y-4 page-fade-in">
-      <section className="glass-card p-4 sm:p-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-df-border bg-df-surface-solid/30 text-df-accent">
-              <Sparkles size={20} />
-            </span>
-            <div className="min-w-0">
-              <h2 className="text-xl font-serif font-bold gradient-text bg-gradient-to-r from-df-accent to-df-accent-secondary sm:text-2xl">
-                {t(lang, "welcomeTitle")}
-              </h2>
-              <p className="mt-0.5 max-w-2xl text-sm leading-relaxed text-df-text-secondary">
-                {t(lang, "welcomeSubtitle")}
-              </p>
-            </div>
+    <div className="space-y-[14px] page-fade-in">
+      <section>
+        <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="h-5 w-0.5 rounded bg-df-accent" />
+            <h2 className="text-[20px] font-semibold leading-none text-df-text">Market Snapshot</h2>
+            <span className="text-xs text-df-text-secondary">Real-time overview</span>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="rounded-full border border-df-border bg-df-surface-solid/25 px-3 py-1.5 text-xs font-bold text-df-text-secondary">
-              {MARKET_LABELS[market][lang]}
-            </span>
-            <span
-              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-bold ${sessionStyle(
-                snapshot?.session_status ?? "unknown",
-              )}`}
-            >
-              {sessionLabel(snapshot?.session_status ?? "unknown", lang)}
-            </span>
+          <div className="flex items-center gap-3 text-xs text-df-text-secondary">
+            <span>Last updated: {latestUpdated}</span>
             <button
               type="button"
               onClick={() => void handleRefresh()}
               disabled={loading || refreshing}
               title={panelText(lang, "refresh")}
               aria-label={panelText(lang, "refresh")}
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-df-border bg-df-surface/80 text-df-text-secondary transition-colors hover:text-df-accent disabled:cursor-not-allowed disabled:opacity-60 click-press"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-blue-400 transition-colors hover:bg-df-surface-solid/30 disabled:cursor-not-allowed disabled:opacity-60 click-press"
             >
-              <RefreshCw size={16} className={loading || refreshing ? "animate-spin" : ""} />
+              <RefreshCw size={17} className={loading || refreshing ? "animate-spin" : ""} />
             </button>
           </div>
         </div>
       </section>
 
-      <section className="glass-card overflow-hidden">
-        <div className="border-b border-df-border/60 p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Activity size={17} className="text-df-accent" />
-              <h3 className="text-sm font-bold uppercase tracking-wider text-df-text-secondary">
-                {panelText(lang, "marketStatus")}
-              </h3>
-            </div>
-            <div className={`text-sm font-bold ${changeStyle(summary.average)}`}>
-              {formatPercent(summary.average)}
-            </div>
-          </div>
+      <section className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
+        {!snapshot && loading
+          ? Array.from({ length: 3 }).map((_, index) => <LoadingIndexCard key={index} />)
+          : dashboardIndices.length
+            ? dashboardIndices.map((index) => (
+                <DashboardIndexCard key={index.symbol} index={index} lang={lang} />
+              ))
+            : (
+              <div className="glass-card p-4 text-sm text-df-text-secondary md:col-span-2 xl:col-span-5">
+                {panelText(lang, "unavailable")}
+              </div>
+            )}
+      </section>
 
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-            <div className="min-w-0 rounded-lg border border-df-border/60 bg-df-surface-solid/20 px-3 py-2">
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-df-text-secondary">
-                <Clock3 size={13} />
-                {panelText(lang, "localTime")}
-              </div>
-              <p className="mt-1 truncate text-sm font-bold text-df-text" title={snapshot?.local_time || ""}>
-                {formatLocalTime(snapshot?.local_time, lang)}
-              </p>
-            </div>
-            <div className="min-w-0 rounded-lg border border-df-border/60 bg-df-surface-solid/20 px-3 py-2">
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-df-text-secondary">
-                <RefreshCw size={13} />
-                {panelText(lang, "updated")}
-              </div>
-              <p className="mt-1 truncate text-sm font-bold text-df-text">
-                {formatDateTime(snapshot?.updated_at, lang, true)}
-              </p>
-            </div>
-            <div className="min-w-0 rounded-lg border border-df-border/60 bg-df-surface-solid/20 px-3 py-2">
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-df-text-secondary">
-                <Wifi size={13} />
-                {panelText(lang, "dataSource")}
-              </div>
-              <p className="mt-1 truncate text-sm font-bold text-df-text" title={snapshot?.source_detail || ""}>
-                {formatSourceLabel(snapshot?.source_detail || snapshot?.source, lang)}
-              </p>
-            </div>
-            <div className="rounded-lg border border-df-border/60 bg-df-surface-solid/20 px-3 py-2">
-              <div className="text-[11px] font-semibold text-df-text-secondary">
-                {lang === "en" ? "Breadth" : lang === "tc" ? "漲跌分佈" : "涨跌分布"}
-              </div>
-              <p className="mt-1 text-sm font-bold text-df-text">
-                <span className="text-emerald-600 dark:text-emerald-300">{summary.up}</span>
-                <span className="mx-1 text-df-text-secondary">/</span>
-                <span className="text-rose-600 dark:text-rose-300">{summary.down}</span>
-                <span className="mx-1 text-df-text-secondary">/</span>
-                <span>{summary.flat}</span>
-              </p>
-            </div>
-            <div className="rounded-lg border border-df-border/60 bg-df-surface-solid/20 px-3 py-2">
-              <div className="text-[11px] font-semibold text-df-text-secondary">
-                {lang === "en" ? "Average Move" : lang === "tc" ? "平均變化" : "平均变化"}
-              </div>
-              <p className={`mt-1 text-sm font-bold ${changeStyle(summary.average)}`}>
-                {formatPercent(summary.average)}
-              </p>
-            </div>
+      <section className="grid gap-2.5 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,0.85fr)_320px]">
+        <article className="glass-card flex h-full flex-col p-3">
+          <div className="mb-3 flex min-h-6 flex-wrap items-center gap-x-2.5 gap-y-1.5">
+            <Activity size={18} className="text-amber-400" />
+            <h3 className="font-serif text-[18px] font-semibold leading-6 text-df-text">{panelText(lang, "marketStatusTitle")}</h3>
+            <span className="font-mono text-xs text-df-text-secondary">({briefDate})</span>
+            <span className="ml-auto truncate font-mono text-[11px] text-df-text-secondary">
+              {compactUpdated}
+            </span>
           </div>
-
-          <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/15 bg-amber-500/10 px-3 py-2 text-xs font-medium text-df-text-secondary">
-            <AlertTriangle size={14} className="shrink-0 text-amber-500" />
-            <span>{panelText(lang, "dataDelayNote")}</span>
+          <div className="grid gap-2 md:grid-cols-2">
+            {statusRows.map((row) => {
+              const Icon = row.icon;
+              return (
+                <div key={row.label} className="grid min-h-[46px] grid-cols-[23px_88px_minmax(0,1fr)] items-center gap-2 rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-1.5">
+                  <Icon size={16} className={row.color} />
+                  <span className="truncate text-[11px] font-medium text-df-text-secondary">{row.label}</span>
+                  <span className={`truncate text-[12px] font-semibold ${row.color}`} title={row.value}>
+                    {row.value}
+                  </span>
+                </div>
+              );
+            })}
           </div>
-
-          <div className="mt-3 rounded-lg border border-df-border/50 bg-df-surface-solid/15 px-3 py-2.5">
+          <div className="mt-2.5 rounded-md border border-amber-400/20 bg-[rgba(245,158,11,0.06)] px-2.5 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
             <div className="mb-1.5 flex items-center gap-2">
-              <Activity size={15} className="text-df-accent" />
-              <span className="text-xs font-bold uppercase tracking-wider text-df-text-secondary">
-                {panelText(lang, "dailyBrief")}
-              </span>
+              <Activity size={15} className="text-amber-400" />
+              <span className="text-xs font-semibold text-df-text">{panelText(lang, "dailyBrief")}</span>
             </div>
-            <div className="grid gap-2 text-sm leading-relaxed text-df-text lg:grid-cols-3">
+            <div className="grid gap-2 lg:grid-cols-3">
               {brief.map((item, index) => (
-                <p key={`${item}-${index}`}>{item}</p>
+                <p key={`${index}-${item}`} className="text-[12px] font-medium leading-5 text-df-text-secondary">
+                  {item}
+                </p>
               ))}
             </div>
           </div>
+        </article>
 
-          {error && (
-            <div className="mt-3 flex items-start gap-2 rounded-lg border border-df-danger/20 bg-df-danger/10 p-3 text-xs leading-relaxed text-df-text-secondary">
-              <AlertTriangle size={15} className="mt-0.5 shrink-0 text-df-danger" />
-              <span>{error}</span>
+        <article className="glass-card flex h-full flex-col p-3">
+          <div className="mb-3 flex min-h-6 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <BarChart3 size={18} className="shrink-0 text-blue-400" />
+              <h3 className="truncate text-[18px] font-semibold leading-6 text-df-text">{panelText(lang, "marketIntelligence")}</h3>
             </div>
-          )}
-        </div>
+            <span className="shrink-0 text-xs text-df-text-secondary">{panelText(lang, "snapshotDerived")}</span>
+          </div>
 
-        <div className="border-t border-df-border/60">
-          <div className="flex items-center gap-2 px-4 py-3">
-            <BarChart3 size={18} className="text-df-accent" />
-            <h3 className="text-sm font-bold uppercase tracking-wider text-df-text-secondary">
-              {panelText(lang, "majorIndices")}
-            </h3>
+          <div className="grid grid-cols-[116px_minmax(0,1fr)] items-center gap-4">
+            <BreadthDonut slices={breadthSlices} total={breadthTotal} noDataLabel={panelText(lang, "noBreadthData")} />
+            <div className="space-y-2">
+              {breadthSlices.map((slice) => (
+                <div key={slice.key} className="grid grid-cols-[auto_minmax(0,1fr)_2.75rem] items-center gap-2 text-xs">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: slice.color }} />
+                  <span className="truncate text-df-text-secondary">{slice.label}</span>
+                  <span className={`text-right font-mono font-semibold ${slice.textClass}`}>
+                    {slice.count}/{breadthTotal}
+                  </span>
+                </div>
+              ))}
+              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2 text-xs leading-5 text-df-text-secondary">
+                {panelText(lang, "breadthBias")}: <span className={`font-semibold ${breadthBias.textClass}`}>{breadthBias.label}</span>
+              </div>
+            </div>
           </div>
-          <div className="grid gap-3 p-4 lg:grid-cols-3">
-            {!snapshot && loading
-              ? Array.from({ length: market === "mixed" ? 4 : 3 }).map((_, index) => (
-                  <LoadingIndexCard key={index} />
-                ))
-              : snapshot?.indices.length
-                ? snapshot.indices.map((index) => (
-                  <IndexTile key={index.symbol} index={index} lang={lang} />
-                ))
-                : (
-                  <div className="rounded-xl border border-df-border/60 bg-df-surface-solid/15 p-4 text-sm text-df-text-secondary lg:col-span-3">
-                    {panelText(lang, "unavailable")}
+
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2.5">
+              <div className="text-[11px] text-df-text-secondary">{panelText(lang, "breadth")}</div>
+              <div className="mt-1 font-mono text-lg font-semibold text-blue-300">{summary.up}</div>
+            </div>
+            <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2.5">
+              <div className="text-[11px] text-df-text-secondary">Avg</div>
+              <div className={`mt-1 font-mono text-lg font-semibold ${changeStyle(summary.average)}`}>
+                {formatPercent(summary.average)}
+              </div>
+            </div>
+            <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2.5">
+              <div className="text-[11px] text-df-text-secondary">Spread</div>
+              <div className="mt-1 font-mono text-lg font-semibold text-df-text">
+                {formatPercent(spread)}
+              </div>
+            </div>
+          </div>
+          <div className="mt-auto pt-3">
+            <div className="grid grid-cols-2 gap-2 border-t border-df-border pt-3">
+              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2">
+                <div className="text-[11px] text-df-text-secondary">{panelText(lang, "trackedIndices")}</div>
+                <div className="mt-1 font-mono text-sm font-semibold text-df-text">{dashboardIndices.length}</div>
+              </div>
+              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2">
+                <div className="text-[11px] text-df-text-secondary">{panelText(lang, "refreshedAt")}</div>
+                <div className="mt-1 truncate font-mono text-xs font-semibold text-df-text-secondary">{compactUpdated}</div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article className="glass-card flex h-full flex-col p-3">
+          <div className="mb-3 flex min-h-6 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <Wifi size={18} className="shrink-0 text-blue-300" />
+              <h3 className="truncate text-[18px] font-semibold leading-6 text-df-text">{panelText(lang, "dataProvenance")}</h3>
+            </div>
+            <span className={`shrink-0 rounded-full border border-df-border bg-df-surface-solid/25 px-2 py-0.5 text-[11px] font-semibold ${sourceHealth.className}`}>
+              {sourceHealth.label}
+            </span>
+          </div>
+
+          <div className="flex flex-1 flex-col gap-2.5">
+            <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-3 py-2.5">
+              <div className="text-[11px] font-medium text-df-text-secondary">{panelText(lang, "primarySource")}</div>
+              <div className="mt-1 truncate text-sm font-semibold text-df-text" title={primarySourceLabel}>
+                {primarySourceLabel}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-3 py-2.5">
+                <div className="text-[11px] font-medium text-df-text-secondary">{panelText(lang, "sourceCoverage")}</div>
+                <div className="mt-1 font-mono text-lg font-semibold text-blue-300">{primarySourcePct}%</div>
+              </div>
+              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-3 py-2.5">
+                <div className="text-[11px] font-medium text-df-text-secondary">{panelText(lang, "providerCount")}</div>
+                <div className="mt-1 font-mono text-lg font-semibold text-df-text">{sourceRows.length}</div>
+              </div>
+            </div>
+
+            {sourceRows.length > 0 ? (
+              <div className="space-y-1.5">
+                {sourceRows.slice(0, 3).map(({ label, pct, color }) => (
+                  <div key={label} className="grid grid-cols-[minmax(0,1fr)_2.5rem] items-center gap-2 text-xs">
+                    <div className="min-w-0">
+                      <div className="mb-1 truncate text-df-text-secondary">{label}</div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-df-surface-solid/35">
+                        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                    <span className="text-right font-mono text-df-text">{pct}%</span>
                   </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-3 py-2.5 text-xs text-df-text-secondary">
+                {panelText(lang, "unavailable")}
+              </div>
+            )}
+
+            <div className="mt-auto space-y-2 border-t border-df-border pt-2.5">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2">
+                  <div className="text-[11px] text-df-text-secondary">{panelText(lang, "trackedIndices")}</div>
+                  <div className="mt-1 font-mono text-sm font-semibold text-df-text">{dashboardIndices.length}</div>
+                </div>
+                <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2">
+                  <div className="text-[11px] text-df-text-secondary">{panelText(lang, "refreshedAt")}</div>
+                  <div className="mt-1 truncate font-mono text-xs font-semibold text-df-text-secondary">{compactUpdated}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-df-text-secondary">
+                {snapshot?.data_warnings?.length ? (
+                  <AlertTriangle size={15} className="text-amber-400" />
+                ) : (
+                  <CheckCircle2 size={15} className="text-blue-300" />
                 )}
+                <span>{panelText(lang, "dataNoticeCount")}: {snapshot?.data_warnings?.length ?? 0}</span>
+              </div>
+            </div>
           </div>
-        </div>
+        </article>
       </section>
 
-      {snapshot?.data_warnings?.length ? (
-        <div className="glass-card p-4">
-          <div className="flex items-start gap-2 text-sm leading-relaxed text-df-text-secondary">
-            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-500" />
-            <span>{snapshot.data_warnings[0]}</span>
-          </div>
-        </div>
-      ) : null}
-
-      <section className="glass-card p-4 sm:p-5">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <BookOpen size={18} className="text-df-accent" />
-            <h3 className="text-sm font-bold uppercase tracking-wider text-df-text-secondary">
-              {t(lang, "changelog")}
-            </h3>
-          </div>
+      <section className="glass-card p-3.5">
+        <div className="mb-3 flex items-center gap-2">
+          <BookOpen size={18} className="text-amber-400" />
+          <h3 className="text-[20px] font-semibold text-df-text">{panelText(lang, "changelog")}</h3>
         </div>
 
-        <div className="divide-y divide-df-border/60">
+        <div className="space-y-2">
           {CHANGELOG.map((entry) => {
             const expanded = expandedVersions.has(entry.version);
+            const sortedItems = [...entry.items].sort(
+              (a, b) => changelogTypeOrder[a.type] - changelogTypeOrder[b.type],
+            );
             return (
-              <div key={entry.version} className="py-3 first:pt-2 last:pb-0">
+              <div key={entry.version} className="border-b border-df-border/70 pb-2 last:border-b-0">
                 <button
                   type="button"
-                  onClick={() => toggleVersion(entry.version)}
-                  className="flex w-full items-center justify-between gap-3 rounded-lg px-1 py-1 text-left transition-colors hover:bg-df-surface-solid/20"
+                  onClick={() => toggleChangelogVersion(entry.version)}
+                  className="grid min-h-9 w-full grid-cols-[24px_78px_minmax(0,1fr)_28px] items-center gap-2 rounded-md bg-df-surface-solid/18 px-2 text-left transition-colors hover:bg-df-surface-solid/28 sm:grid-cols-[26px_86px_minmax(0,1fr)_30px] sm:px-3"
                   aria-expanded={expanded}
                 >
-                  <div className="flex min-w-0 items-center gap-2">
-                    {expanded ? (
-                      <ChevronDown size={16} className="shrink-0 text-df-text-secondary" />
-                    ) : (
-                      <ChevronRight size={16} className="shrink-0 text-df-text-secondary" />
-                    )}
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-df-accent/10 text-df-accent">
-                      {entry.version.startsWith("V") ? entry.version : `v${entry.version}`}
-                    </span>
-                    <span className="text-xs text-df-text-secondary">{entry.date}</span>
-                  </div>
-                  <span className="shrink-0 text-xs text-df-text-secondary">
-                    {entry.items.length}
-                  </span>
+                  <ChevronDown
+                    size={15}
+                    className={`text-df-text-secondary transition-transform ${expanded ? "rotate-0" : "-rotate-90"}`}
+                  />
+                  <span className="font-mono text-[13px] font-semibold leading-none text-amber-400 sm:text-sm">{entry.version}</span>
+                  <span className="truncate font-mono text-[12px] text-df-text-secondary sm:text-sm">{entry.date}</span>
+                  <span className="text-right font-mono text-[11px] text-df-text-secondary">{entry.items.length}</span>
                 </button>
 
                 {expanded && (
-                  <ul className="mt-2 space-y-2 pl-7">
-                    {[...entry.items]
-                      .sort((a, b) => changelogTypeOrder[a.type] - changelogTypeOrder[b.type])
-                      .map((item, idx) => (
-                        <li key={idx} className="flex flex-col items-start gap-1.5 sm:flex-row sm:gap-2">
-                          <Badge type={item.type} lang={lang} />
-                          <span className="text-sm leading-relaxed text-df-text">{item.text[lang]}</span>
-                        </li>
-                      ))}
-                  </ul>
+                  <div className="space-y-1.5 px-7 py-2 sm:px-11">
+                    {sortedItems.map((item, index) => (
+                      <div key={`${entry.version}-${item.type}-${index}`} className="grid grid-cols-[58px_minmax(0,1fr)] gap-3 sm:grid-cols-[66px_minmax(0,1fr)]">
+                        <Badge type={item.type} lang={lang} />
+                        <p className="self-center text-[12px] leading-5 text-df-text-secondary sm:text-[13px] sm:leading-6">
+                          {item.text[lang] || item.text.en}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             );

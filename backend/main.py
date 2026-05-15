@@ -57,7 +57,7 @@ crisis_warning_service = analysis_service.crisis_warning_service
 app = FastAPI(
     title="DeepFirm Quant",
     description="Industrial-grade quant risk and decision engine",
-    version="3.6.0",
+    version="4.0.0",
 )
 
 app.add_middleware(
@@ -188,9 +188,21 @@ async def evaluate_risk(payload: RiskEvaluationRequest) -> RiskEvaluationResult:
     try:
         fetcher = _make_fetcher(payload.api_key, payload.allow_sandbox_data)
         engine = RiskEngine(fetcher=fetcher, aligner=aligner)
+
+        def build_result() -> RiskEvaluationResult:
+            price_df = engine._fetch_prices(
+                payload.tickers,
+                payload.start_date,
+                payload.end_date,
+                market_mode=payload.market,
+            )
+            risk_result = engine.evaluate_from_prices(payload, price_df)
+            analysis_service.attach_risk_benchmark(risk_result, payload, price_df)
+            return risk_result
+
         result = await _run_blocking_operation(
             "risk evaluation",
-            lambda: engine.evaluate(payload),
+            build_result,
             _request_timeout_seconds(),
         )
         _attach_data_provenance(result, fetcher)

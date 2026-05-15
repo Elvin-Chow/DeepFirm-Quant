@@ -1,7 +1,16 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Activity, BarChart3, Shield, TrendingUp, Scale, Sparkles, Menu, FileText } from "lucide-react";
+import {
+  AlertCircle,
+  AlertTriangle,
+  FileText,
+  Home as HomeIcon,
+  Menu,
+  Settings,
+  SlidersHorizontal,
+  TrendingUp,
+} from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import RiskTab from "@/components/RiskTab";
 import AlphaTab from "@/components/AlphaTab";
@@ -10,7 +19,7 @@ import MachineLearningTab from "@/components/MachineLearningTab";
 import CrisisWarningTab from "@/components/CrisisWarningTab";
 import ReportTab from "@/components/ReportTab";
 import WelcomeTab from "@/components/WelcomeTab";
-import { postApi } from "@/hooks/useApi";
+import { checkApiHealth, postApi } from "@/hooks/useApi";
 import { useLanguage } from "@/hooks/useLanguage";
 import { usePresets, type Preset } from "@/hooks/usePresets";
 import {
@@ -43,12 +52,48 @@ type TabConfig = {
 type RegimeModelType = NonNullable<AnalysisRunRequest["regime_model_type"]>;
 type MLForecastHorizon = NonNullable<AnalysisRunRequest["ml_horizon"]>;
 type AllocationMode = NonNullable<PortfolioOptimizeRequest["allocation_mode"]>;
+type MarketFlag = { src: string; alt: string; objectPosition?: string };
+type BackendHealth = "checking" | "online" | "offline";
 
-const MARKET_NAV_OPTIONS: { key: MarketMode; label: string; title: string }[] = [
-  { key: "us", label: "US", title: "US Market" },
-  { key: "hk", label: "HK", title: "HK Market" },
-  { key: "cn", label: "CN", title: "China A-Share Market" },
-  { key: "mixed", label: "Mix", title: "Mixed Market" },
+const BACKEND_HEALTH_INTERVAL_MS = 5_000;
+
+const BACKEND_HEALTH_VIEW: Record<
+  BackendHealth,
+  { label: string; containerClass: string; ringClass: string; dotClass: string }
+> = {
+  checking: {
+    label: "Backend Checking",
+    containerClass: "border-amber-400/25 text-amber-200",
+    ringClass: "border-amber-400/35",
+    dotClass: "bg-amber-300 animate-pulse",
+  },
+  online: {
+    label: "Backend Online",
+    containerClass: "border-emerald-400/25 text-df-text",
+    ringClass: "border-emerald-400/40",
+    dotClass: "bg-emerald-400",
+  },
+  offline: {
+    label: "Backend Offline",
+    containerClass: "border-red-400/25 text-red-200",
+    ringClass: "border-red-400/35",
+    dotClass: "bg-red-400",
+  },
+};
+
+const MARKET_NAV_OPTIONS: { key: MarketMode; label: string; title: string; flags: MarketFlag[] }[] = [
+  { key: "us", label: "US", title: "US Market", flags: [{ src: "/flags/us.svg", alt: "US flag" }] },
+  { key: "hk", label: "HK", title: "HK Market", flags: [{ src: "/flags/hk.png?v=1", alt: "Hong Kong flag", objectPosition: "59% 50%" }] },
+  { key: "cn", label: "CN", title: "China A-Share Market", flags: [{ src: "/flags/cn.svg?v=2", alt: "China flag" }] },
+  {
+    key: "mixed",
+    label: "Mix",
+    title: "Mixed Market",
+    flags: [
+      { src: "/flags/us.svg", alt: "US flag" },
+      { src: "/flags/hk.png?v=1", alt: "Hong Kong flag", objectPosition: "59% 50%" },
+    ],
+  },
 ];
 
 const DEFAULT_TICKERS_BY_MARKET: Record<MarketMode, string> = {
@@ -60,48 +105,40 @@ const DEFAULT_TICKERS_BY_MARKET: Record<MarketMode, string> = {
 
 const MARKET_SELECTION_STORAGE_KEY = "deepfirm.marketMode.v1";
 const MARKET_SNAPSHOT_STORAGE_KEY = "deepfirm.marketSnapshots.v1";
+const MARKET_SNAPSHOT_REFRESH_STORAGE_KEY = "deepfirm.marketSnapshotRefreshedAt.v1";
+const MARKET_SNAPSHOT_AUTO_REFRESH_INTERVAL_MS = 5 * 60_000;
 
-const FLAG_ASSETS = {
-  us: "https://cdn.jsdelivr.net/gh/lipis/flag-icons/flags/4x3/us.svg",
-  hk: "https://cdn.jsdelivr.net/gh/lipis/flag-icons/flags/4x3/hk.svg",
-  cn: "https://cdn.jsdelivr.net/gh/lipis/flag-icons/flags/4x3/cn.svg",
-} as const;
-
-function FlagImage({
-  code,
-  className = "",
-}: {
-  code: keyof typeof FLAG_ASSETS;
-  className?: string;
-}) {
-  const cnImageClass = code === "cn" ? "object-cover object-left" : "object-cover";
-  const cnBackground = code === "cn" ? "bg-[#de2910]" : "bg-transparent";
-
+function MarketFlagImage({ flag, className = "" }: { flag: MarketFlag; className?: string }) {
   return (
     <span
-      className={`block h-7 w-7 overflow-hidden rounded-full ${cnBackground} ${className}`}
+      className={`overflow-hidden rounded-full border border-white/25 bg-df-surface-solid/40 shadow-[0_8px_18px_rgba(0,0,0,0.2)] ${className}`}
     >
       <img
-        src={FLAG_ASSETS[code]}
-        alt={`${code.toUpperCase()} flag`}
-        className={`h-full w-full ${cnImageClass}`}
-        loading="lazy"
-        decoding="async"
-        referrerPolicy="no-referrer"
+        src={flag.src}
+        alt={flag.alt}
+        className="h-full w-full object-cover"
+        style={flag.objectPosition ? { objectPosition: flag.objectPosition } : undefined}
       />
     </span>
   );
 }
 
-function MarketFlag({ mode }: { mode: MarketMode }) {
-  if (mode !== "mixed") {
-    return <FlagImage code={mode} />;
+function MarketFlagBadge({ flags }: { flags: MarketFlag[] }) {
+  if (flags.length <= 1) {
+    return <MarketFlagImage flag={flags[0]} className="flex h-7 w-7 shrink-0" />;
   }
 
   return (
-    <span className="relative flex h-7 w-10 items-center">
-      <FlagImage code="us" className="absolute left-0" />
-      <FlagImage code="hk" className="absolute right-0" />
+    <span className="relative h-7 w-9 shrink-0">
+      {flags.slice(0, 2).map((flag, index) => (
+        <MarketFlagImage
+          key={`${flag.src}-${index}`}
+          flag={flag}
+          className={`absolute top-0 flex h-7 w-7 ${
+            index === 0 ? "left-0" : "left-2.5"
+          }`}
+        />
+      ))}
     </span>
   );
 }
@@ -212,6 +249,47 @@ function writeStoredMarketSnapshots(snapshots: Partial<Record<MarketMode, Market
   }
 }
 
+function readStoredMarketSnapshotRefreshTimes(): Partial<Record<MarketMode, number>> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const raw = window.localStorage.getItem(MARKET_SNAPSHOT_REFRESH_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw) as Partial<Record<MarketMode, number>>;
+    const refreshTimes: Partial<Record<MarketMode, number>> = {};
+    for (const option of MARKET_NAV_OPTIONS) {
+      const value = parsed?.[option.key];
+      if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+        refreshTimes[option.key] = value;
+      }
+    }
+    return refreshTimes;
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredMarketSnapshotRefreshTimes(refreshTimes: Partial<Record<MarketMode, number>>): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(MARKET_SNAPSHOT_REFRESH_STORAGE_KEY, JSON.stringify(refreshTimes));
+  } catch {
+    return;
+  }
+}
+
+function shouldAutoRefreshMarketSnapshot(lastRefreshAt: number | undefined, hasCachedSnapshot: boolean): boolean {
+  if (!hasCachedSnapshot || !lastRefreshAt) {
+    return true;
+  }
+  return Date.now() - lastRefreshAt >= MARKET_SNAPSHOT_AUTO_REFRESH_INTERVAL_MS;
+}
+
 function readStoredMarketMode(): MarketMode | null {
   if (typeof window === "undefined") {
     return null;
@@ -247,7 +325,7 @@ export default function Home() {
   const [marketReady, setMarketReady] = useState(false);
   const [marketSnapshots, setMarketSnapshots] = useState<Partial<Record<MarketMode, MarketSnapshotResult>>>({});
   const [marketSnapshotsReady, setMarketSnapshotsReady] = useState(false);
-  const [marketSnapshotAutoRefreshDone, setMarketSnapshotAutoRefreshDone] = useState<Partial<Record<MarketMode, boolean>>>({});
+  const [marketSnapshotRefreshTimes, setMarketSnapshotRefreshTimes] = useState<Partial<Record<MarketMode, number>>>({});
   const [timeWindow, setTimeWindow] = useState("1Y");
   const [weights, setWeights] = useState<number[]>([]);
   const [capital, setCapital] = useState(1_000_000);
@@ -291,6 +369,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [analysisCompleted, setAnalysisCompleted] = useState(false);
+  const [backendHealth, setBackendHealth] = useState<BackendHealth>("checking");
+  const [backendHealthMessage, setBackendHealthMessage] = useState("Checking backend health.");
 
   const handleMarketChange = useCallback((nextMarket: MarketMode) => {
     setMarket(nextMarket);
@@ -312,11 +392,15 @@ export default function Home() {
     });
   }, []);
 
-  const handleMarketSnapshotAutoRefreshComplete = useCallback((snapshotMarket: MarketMode) => {
-    setMarketSnapshotAutoRefreshDone((current) => ({
-      ...current,
-      [snapshotMarket]: true,
-    }));
+  const handleMarketSnapshotRefreshComplete = useCallback((snapshotMarket: MarketMode) => {
+    setMarketSnapshotRefreshTimes((current) => {
+      const next = {
+        ...current,
+        [snapshotMarket]: Date.now(),
+      };
+      writeStoredMarketSnapshotRefreshTimes(next);
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -326,8 +410,49 @@ export default function Home() {
       setTickers(DEFAULT_TICKERS_BY_MARKET[storedMarket]);
     }
     setMarketSnapshots(readStoredMarketSnapshots());
+    setMarketSnapshotRefreshTimes(readStoredMarketSnapshotRefreshTimes());
     setMarketReady(true);
     setMarketSnapshotsReady(true);
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let activeController: AbortController | null = null;
+
+    const runHealthCheck = async () => {
+      activeController?.abort();
+      const controller = new AbortController();
+      activeController = controller;
+
+      try {
+        await checkApiHealth(controller.signal);
+        if (!disposed && !controller.signal.aborted) {
+          setBackendHealth("online");
+          setBackendHealthMessage("Backend health check passed.");
+        }
+      } catch (err) {
+        if (disposed || controller.signal.aborted) {
+          return;
+        }
+        setBackendHealth("offline");
+        setBackendHealthMessage(err instanceof Error ? err.message : "Backend health check failed.");
+      } finally {
+        if (activeController === controller) {
+          activeController = null;
+        }
+      }
+    };
+
+    void runHealthCheck();
+    const intervalId = window.setInterval(() => {
+      void runHealthCheck();
+    }, BACKEND_HEALTH_INTERVAL_MS);
+
+    return () => {
+      disposed = true;
+      activeController?.abort();
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   useEffect(() => {
@@ -337,7 +462,11 @@ export default function Home() {
       return;
     }
     setWeights((current) => {
-      if (current.length === tickerList.length) return current;
+      const currentTotal = current.reduce(
+        (total, weight) => total + (Number.isFinite(weight) ? weight : 0),
+        0
+      );
+      if (current.length === tickerList.length && currentTotal > 0) return current;
       return tickerList.map(() => Math.round(100 / tickerList.length));
     });
   }, [tickers]);
@@ -585,18 +714,27 @@ export default function Home() {
   }, []);
 
   const allTabs: TabConfig[] = [
-    { key: "welcome", label: t(lang, "welcome"), desktopLabel: t(lang, "welcome"), mobileLabel: t(lang, "welcome"), icon: Sparkles },
-    { key: "risk", label: t(lang, "risk"), desktopLabel: t(lang, "risk"), mobileLabel: t(lang, "risk"), icon: Shield },
-    { key: "crisis", label: t(lang, "crisisWarningNav"), desktopLabel: t(lang, "crisisWarningMobile"), mobileLabel: t(lang, "crisisWarningMobile"), icon: Activity },
-    { key: "ml", label: t(lang, "machineLearningBeta"), desktopLabel: t(lang, "machineLearningBeta"), mobileLabel: "ML", icon: BarChart3 },
+    { key: "welcome", label: t(lang, "welcome"), desktopLabel: t(lang, "welcome"), mobileLabel: t(lang, "welcome"), icon: HomeIcon },
+    { key: "risk", label: t(lang, "risk"), desktopLabel: t(lang, "risk"), mobileLabel: t(lang, "risk"), icon: AlertCircle },
+    { key: "crisis", label: t(lang, "crisisWarningNav"), desktopLabel: t(lang, "crisisWarningMobile"), mobileLabel: t(lang, "crisisWarningMobile"), icon: AlertTriangle },
+    { key: "ml", label: t(lang, "machineLearningBeta"), desktopLabel: t(lang, "machineLearningBeta"), mobileLabel: "ML", icon: Settings },
     { key: "alpha", label: t(lang, "alpha"), desktopLabel: t(lang, "alpha"), mobileLabel: t(lang, "alpha"), icon: TrendingUp },
-    { key: "decision", label: t(lang, "decision"), desktopLabel: t(lang, "decision"), mobileLabel: t(lang, "decision"), icon: Scale },
+    { key: "decision", label: t(lang, "decision"), desktopLabel: t(lang, "decision"), mobileLabel: t(lang, "decision"), icon: SlidersHorizontal },
     { key: "report", label: t(lang, "report"), desktopLabel: t(lang, "report"), mobileLabel: t(lang, "reportMobile"), icon: FileText },
   ];
   const tabs = allTabs.filter((tab) => market !== "cn" || tab.key !== "alpha");
   const currencySymbol = getCurrencySymbol(market);
   const mobileGridClass =
     tabs.length === 7 ? "grid-cols-7" : tabs.length === 6 ? "grid-cols-6" : tabs.length === 5 ? "grid-cols-5" : "grid-cols-4";
+  const backendHealthView = BACKEND_HEALTH_VIEW[backendHealth];
+  const activeHeaderLabel = activeTab === "welcome"
+    ? t(lang, "welcomeSubtitle")
+    : tabs.find((tab) => tab.key === activeTab)?.desktopLabel;
+  const currentMarketSnapshot = marketSnapshots[market] ?? null;
+  const shouldRefreshCurrentMarketSnapshot =
+    marketReady &&
+    marketSnapshotsReady &&
+    shouldAutoRefreshMarketSnapshot(marketSnapshotRefreshTimes[market], Boolean(currentMarketSnapshot));
 
   return (
     <div className="flex min-h-screen lg:h-screen lg:overflow-hidden">
@@ -668,86 +806,100 @@ export default function Home() {
         />
       )}
 
-      <main className="min-w-0 flex-1 p-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] sm:p-5 sm:pb-[calc(6.5rem+env(safe-area-inset-bottom))] lg:h-screen lg:overflow-y-auto lg:px-8 lg:py-5">
-        <div className="mx-auto flex min-h-[calc(100dvh-9rem)] max-w-7xl flex-col page-fade-in lg:min-h-[calc(100vh-2.5rem)]">
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
-            <div className="min-w-0 sm:max-w-md">
-              <div className="flex items-center gap-3">
+      <main className="min-w-0 flex-1 pb-[calc(6.5rem+env(safe-area-inset-bottom))] lg:h-screen lg:overflow-y-auto lg:pb-0">
+        <div className="sticky top-0 z-20 border-b border-df-border bg-[rgba(255,255,255,0.9)] shadow-[0_14px_30px_-30px_rgba(15,23,42,0.22)] backdrop-blur-xl dark:bg-[rgba(12,15,15,0.9)] dark:shadow-[0_18px_44px_-36px_rgba(0,0,0,0.95)]">
+          <div className="h-[60px] px-4 lg:px-[18px]">
+            <div className="flex h-full items-center justify-between gap-4">
+              <div className="flex min-w-0 flex-1 items-center gap-5">
                 <button
                   onClick={() => setSidebarOpen(true)}
-                  className="lg:hidden p-2 rounded-xl bg-df-surface border border-df-border text-df-text hover:text-df-accent transition-colors click-press"
+                  className="flex h-9 w-9 items-center justify-center rounded-md text-df-text-secondary transition-colors hover:bg-df-surface-solid/30 hover:text-df-text lg:hidden"
                   aria-label="Open menu"
                 >
-                  <Menu size={20} />
+                  <Menu size={22} />
                 </button>
-                <h1 className="min-w-0 text-2xl font-serif font-bold gradient-text bg-gradient-to-r from-df-accent to-df-accent-secondary sm:text-3xl">
-                  DeepFirm Quant
-                </h1>
-              </div>
-              <p className="mt-1 text-sm leading-relaxed text-df-text-secondary">
-                {t(lang, "subtitle")}
-              </p>
-            </div>
-
-            <div className="flex min-w-0 flex-col gap-2 sm:flex-1 sm:items-end">
-              <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:justify-end">
-                <span className="text-[10px] font-medium tracking-[0.12em] text-df-text-secondary">
-                  {t(lang, "market")}
+                <span
+                  className={`min-w-0 truncate text-df-text ${
+                    activeTab === "welcome"
+                      ? "font-serif text-[16px] font-semibold leading-tight tracking-normal"
+                      : "text-sm font-semibold"
+                  }`}
+                >
+                  {activeHeaderLabel}
                 </span>
-                <div className="flex items-center gap-0.5 rounded-full border border-df-border bg-df-surface/85 p-0.5 shadow-[0_10px_22px_rgba(15,23,42,0.06)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04] dark:shadow-none">
+              </div>
+
+              <div className="flex shrink-0 items-center gap-3">
+                <div className="market-switch hidden h-10 items-center gap-1.5 rounded-full border border-df-border p-0.5 pl-3 backdrop-blur-xl md:flex">
+                  <span className="mr-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-df-text-secondary">
+                    Market
+                  </span>
                   {MARKET_NAV_OPTIONS.map((option) => {
-                    const isActive = market === option.key;
+                    const selected = market === option.key;
                     return (
                       <button
                         key={option.key}
                         type="button"
-                        onClick={() => handleMarketChange(option.key)}
                         title={option.title}
-                        aria-label={option.title}
-                        className={`flex items-center gap-1.5 rounded-full border py-1 pl-1 pr-2.5 text-xs font-semibold transition-colors click-press ${
-                          isActive
-                            ? "border-stone-300 bg-white/70 text-df-text dark:border-white/15 dark:bg-white/[0.07] dark:text-df-text"
-                            : "border-transparent text-df-text-secondary hover:border-df-border hover:bg-df-surface-solid/45 hover:text-df-text dark:hover:border-white/10 dark:hover:bg-white/[0.05]"
+                        onClick={() => handleMarketChange(option.key)}
+                        className={`flex h-[34px] items-center gap-2 rounded-full border py-0.5 pl-1 pr-3 text-[13px] font-semibold transition-colors click-press ${
+                          selected
+                            ? "market-option-selected"
+                            : "market-option-idle"
                         }`}
+                        aria-pressed={selected}
                       >
-                        <MarketFlag mode={option.key} />
+                        <MarketFlagBadge flags={option.flags} />
                         <span>{option.label}</span>
                       </button>
                     );
                   })}
                 </div>
-              </div>
-
-              <div className="hidden max-w-full flex-nowrap gap-1.5 overflow-x-auto pb-1 lg:flex lg:justify-end">
-                {tabs.map((tab) => {
-                  const Icon = tab.icon;
-                  const isActive = activeTab === tab.key;
-                  return (
-                    <button
-                      key={tab.key}
-                      onClick={() => setActiveTab(tab.key)}
-                      title={tab.label}
-                      aria-current={isActive ? "page" : undefined}
-                      className={`relative isolate flex shrink-0 items-center gap-1.5 overflow-hidden rounded-full border px-3 py-2 text-[13px] font-medium transition-all click-press xl:px-3.5 xl:text-sm ${
-                        isActive
-                          ? "border-transparent text-white"
-                          : "bg-df-surface border border-df-border text-df-text-secondary hover:text-df-text hover-lift"
-                      }`}
-                    >
-                      {isActive && (
-                        <span
-                          className="absolute inset-0 rounded-full bg-gradient-to-r from-df-accent to-df-accent-secondary"
-                          aria-hidden="true"
-                        />
-                      )}
-                      <Icon size={16} className="relative z-10" />
-                      <span className="relative z-10">{tab.desktopLabel}</span>
-                    </button>
-                  );
-                })}
+                <div
+                  className={`hidden h-9 items-center gap-2 rounded-md border bg-df-surface px-3 text-xs font-semibold sm:flex ${backendHealthView.containerClass}`}
+                  title={backendHealthMessage}
+                  aria-live="polite"
+                >
+                  <span className={`flex h-3.5 w-3.5 items-center justify-center rounded-full border ${backendHealthView.ringClass}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${backendHealthView.dotClass}`} />
+                  </span>
+                  {backendHealthView.label}
+                </div>
               </div>
             </div>
           </div>
+
+          <div className="hidden px-4 pb-2 lg:block lg:px-[18px]">
+            <nav
+              aria-label="Primary navigation"
+              className="grid gap-2"
+              style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
+            >
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setActiveTab(tab.key)}
+                    aria-current={isActive ? "page" : undefined}
+                    className={`flex h-10 min-w-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-semibold transition-colors click-press ${
+                      isActive
+                        ? "border-black/80 bg-gradient-to-r from-black to-neutral-800 text-white shadow-[0_14px_32px_-24px_rgba(15,23,42,0.46)] dark:border-white/70 dark:from-[rgba(102,117,255,0.58)] dark:to-[rgba(75,86,180,0.54)] dark:shadow-[0_14px_34px_-24px_rgba(102,117,255,0.72)]"
+                        : "border-df-border/70 bg-white/75 text-df-text-secondary hover:bg-white hover:text-df-text dark:bg-df-surface-solid/18 dark:hover:bg-df-surface-solid/30"
+                    }`}
+                  >
+                    <Icon size={17} className="shrink-0" />
+                    <span className="truncate">{tab.desktopLabel}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+        </div>
+
+        <div className="mx-auto flex min-h-[calc(100dvh-9rem)] max-w-none flex-col px-4 py-4 page-fade-in sm:px-5 lg:min-h-[calc(100vh-112px)] lg:px-[17px] lg:py-4">
 
           {loading && (
             <div className="mb-4">
@@ -765,13 +917,13 @@ export default function Home() {
               lang={lang}
               market={market}
               snapshotsReady={marketReady && marketSnapshotsReady}
-              shouldAutoRefresh={marketReady && marketSnapshotsReady && !marketSnapshotAutoRefreshDone[market]}
-              cachedSnapshot={marketSnapshots[market] ?? null}
+              shouldAutoRefresh={shouldRefreshCurrentMarketSnapshot}
+              cachedSnapshot={currentMarketSnapshot}
               onSnapshotChange={handleMarketSnapshotChange}
-              onAutoRefreshComplete={handleMarketSnapshotAutoRefreshComplete}
+              onSnapshotRefreshComplete={handleMarketSnapshotRefreshComplete}
             />
           )}
-          {activeTab === "risk" && <RiskTab data={riskData} loading={loading} lang={lang} currencySymbol={currencySymbol} />}
+          {activeTab === "risk" && <RiskTab data={riskData} anomaly={anomalyData} regime={regimeData} loading={loading} lang={lang} currencySymbol={currencySymbol} />}
           {activeTab === "crisis" && <CrisisWarningTab crisisWarning={crisisWarningData} loading={loading} hasAnalysisRun={analysisCompleted} lang={lang} />}
           {activeTab === "ml" && <MachineLearningTab data={riskData} anomaly={anomalyData} regime={regimeData} mlForecast={mlForecastData} loading={loading} lang={lang} />}
           {market !== "cn" && activeTab === "alpha" && (
@@ -800,11 +952,13 @@ export default function Home() {
             />
           )}
 
-          <footer className="mt-auto pt-8 pb-2 text-center">
-            <span className="inline-flex items-center justify-center rounded-full border border-df-border bg-df-surface/80 px-3.5 py-1.5 text-[11px] font-medium text-df-text-secondary shadow-[0_10px_24px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:bg-df-surface/70">
-              {t(lang, "footerCredit")}
-            </span>
-          </footer>
+          {activeTab !== "welcome" && (
+            <footer className="mt-auto pt-8 pb-2 text-center">
+              <span className="inline-flex items-center justify-center rounded-full border border-df-border bg-df-surface/80 px-3.5 py-1.5 text-[11px] font-medium text-df-text-secondary shadow-[0_10px_24px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:bg-df-surface/70">
+                {t(lang, "footerCredit")}
+              </span>
+            </footer>
+          )}
         </div>
       </main>
 

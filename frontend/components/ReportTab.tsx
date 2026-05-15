@@ -18,6 +18,7 @@ import {
 import EmptyState from "@/components/ui/EmptyState";
 import Loading from "@/components/ui/Loading";
 import { localizeDecisionImpact, localizeModelHealth, localizeWarning } from "@/lib/statusText";
+import { useTheme } from "@/hooks/useTheme";
 
 interface ReportTabProps {
   data: RiskReportResult | null;
@@ -466,8 +467,8 @@ function PillButton({
       onClick={onClick}
       className={`inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-semibold transition-colors click-press ${
         primary
-          ? "border-stone-900 bg-stone-900 text-white hover:bg-stone-800"
-          : "border-stone-300 bg-white text-stone-800 hover:bg-stone-50"
+          ? "border-stone-900 bg-stone-900 text-white hover:bg-stone-800 dark:border-white/60 dark:bg-[linear-gradient(90deg,var(--df-accent),var(--df-accent-secondary))] dark:hover:brightness-110"
+          : "border-stone-300 bg-white text-stone-800 hover:bg-stone-50 dark:border-white/15 dark:bg-df-surface-solid/20 dark:text-df-text dark:hover:bg-df-surface-solid/30"
       }`}
     >
       <Icon size={16} />
@@ -663,6 +664,8 @@ export default function ReportTab({
   onGenerate,
   onPrint,
 }: ReportTabProps) {
+  const { resolvedTheme } = useTheme();
+
   if (loading) return <Loading />;
 
   if (!data) {
@@ -706,7 +709,10 @@ export default function ReportTab({
         </div>
       )}
 
-      <article className="report-print-root mx-auto max-w-5xl rounded-lg border border-stone-200 bg-white p-5 text-stone-900 shadow-[0_24px_70px_-48px_rgba(41,37,36,0.55)] sm:p-8">
+      <article
+        data-report-theme={resolvedTheme}
+        className="report-print-root mx-auto max-w-5xl rounded-lg border border-stone-200 bg-white p-5 text-stone-900 shadow-[0_24px_70px_-48px_rgba(41,37,36,0.55)] sm:p-8"
+      >
         <header className="border-b border-stone-200 pb-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">

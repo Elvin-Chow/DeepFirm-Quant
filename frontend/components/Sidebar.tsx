@@ -28,7 +28,6 @@ import { t, Lang } from "@/lib/i18n";
 import type { CurrencySymbol } from "@/lib/currency";
 import { Preset } from "@/hooks/usePresets";
 import { useTheme } from "@/hooks/useTheme";
-import GradientButton from "@/components/ui/GradientButton";
 import HelpTip from "@/components/ui/HelpTip";
 import React, { useEffect, useState } from "react";
 
@@ -107,12 +106,12 @@ function AccordionSection({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="mb-2">
+    <section className="border-b border-df-border/70 py-3 last:border-b-0">
       <div
-        className={`flex w-full items-center gap-2 rounded-2xl border px-2.5 py-2.5 transition-all sm:py-2 ${
+        className={`flex w-full items-center gap-2 rounded-md px-1 py-1 transition-colors ${
           open
-            ? "border-df-border bg-df-surface-solid/30 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]"
-            : "border-transparent hover:border-df-border/70 hover:bg-df-surface-solid/25"
+            ? "text-df-text"
+            : "text-df-text-secondary hover:bg-df-surface-solid/20 hover:text-df-text"
         }`}
       >
         <button
@@ -120,17 +119,17 @@ function AccordionSection({
           onClick={() => setOpen(!open)}
           className="group min-w-0 flex flex-1 items-center justify-between text-left"
         >
-          <span className="flex min-w-0 items-center gap-2.5 text-df-text-secondary">
+          <span className="flex min-w-0 items-center gap-2.5">
             <span
-              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors ${
+              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors ${
                 open
-                  ? "bg-df-accent/10 text-df-accent"
-                  : "bg-df-surface-solid/30 text-df-text-secondary group-hover:text-df-text"
+                  ? "text-df-accent"
+                  : "text-df-text-secondary group-hover:text-df-text"
               }`}
             >
               <Icon size={14} />
             </span>
-            <span className="truncate text-[11px] font-semibold uppercase tracking-[0.14em]">
+            <span className="truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-df-text-secondary group-hover:text-df-text">
               {title}
             </span>
           </span>
@@ -144,10 +143,17 @@ function AccordionSection({
         {helpText && <HelpTip text={helpText} />}
       </div>
       {open && (
-        <div className="space-y-3 px-2 pb-2 pt-1 sm:px-3">{children}</div>
+        <div className="space-y-3 px-2 pb-1 pt-2">{children}</div>
       )}
-    </div>
+    </section>
   );
+}
+
+function sliderProgressStyle(value: number, min: number, max: number): React.CSSProperties {
+  const range = max - min;
+  const rawPercent = range > 0 ? ((value - min) / range) * 100 : 0;
+  const percent = Math.min(100, Math.max(0, rawPercent));
+  return { "--df-slider-progress": `${percent}%` } as React.CSSProperties;
 }
 
 export default function Sidebar(props: SidebarProps) {
@@ -224,6 +230,12 @@ export default function Sidebar(props: SidebarProps) {
   const selectedPreset = presets.find((preset) => preset.name === selectedPresetName);
   const CapitalIcon = currencySymbol === "¥" ? JapaneseYen : DollarSign;
   const capitalInputPadding = currencySymbol.length > 1 ? "pl-14" : "pl-8";
+  const totalWeight = weights.reduce((total, value) => total + (Number.isFinite(value) ? value : 0), 0);
+  const themeOptions = [
+    { key: "light" as const, icon: Sun, label: "Light theme" },
+    { key: "dark" as const, icon: Moon, label: "Dark theme" },
+    { key: "auto" as const, icon: Monitor, label: "Auto theme" },
+  ];
 
   useEffect(() => {
     setMounted(true);
@@ -246,77 +258,70 @@ export default function Sidebar(props: SidebarProps) {
   return (
     <aside
       className={`
-        h-[100dvh] w-[min(22rem,100vw)] shrink-0 overflow-hidden border-r border-df-border bg-df-surface backdrop-blur-2xl sm:w-[22rem] lg:h-screen
+        h-[100dvh] w-[min(330px,100vw)] shrink-0 overflow-hidden border-r border-df-border bg-[rgba(252,252,252,0.94)] shadow-[18px_0_44px_-40px_rgba(15,23,42,0.26)] backdrop-blur-2xl dark:bg-[rgba(12,15,15,0.94)] dark:shadow-[18px_0_54px_-46px_rgba(0,0,0,0.98)] sm:w-[330px] lg:h-screen
         flex flex-col
         fixed top-0 left-0 z-50 transform transition-[background-color,border-color,transform] duration-300 ease-out
         lg:static lg:z-auto lg:translate-x-0
         ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
       `}
     >
-      {/* Header */}
-      <div className="border-b border-df-border p-4 sm:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="min-w-0 text-xl font-serif font-bold gradient-text bg-gradient-to-r from-df-accent to-df-accent-secondary">
-            DeepFirm Quant
+      <div className="border-b border-df-border px-5 py-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="truncate text-[22px] font-bold tracking-tight text-[#111111] dark:text-[#d7dcde]">
+            <span>DeepFirm</span>{" "}
+            <span>Quant</span>
           </h2>
           {onCloseMobile && (
             <button
               onClick={onCloseMobile}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-df-text-secondary transition-colors hover:bg-df-surface-solid/30 hover:text-df-text lg:hidden"
+              className="flex h-9 w-9 items-center justify-center rounded-md text-df-text-secondary transition-colors hover:bg-df-surface-solid/30 hover:text-df-text lg:hidden"
               aria-label="Close menu"
             >
               <X size={18} />
             </button>
           )}
         </div>
-
-        <div className="flex items-center gap-2">
-          {/* Language toggle */}
-          <div className="flex items-center gap-1 rounded-full bg-df-surface-solid/30 p-1">
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
             {(
               [
                 { key: "en", label: "EN" },
                 { key: "zh", label: "中" },
                 { key: "tc", label: "繁" },
               ] as { key: Lang; label: string }[]
-            ).map((l) => (
+            ).map((option) => (
               <button
-                key={l.key}
-                onClick={() => setLang(l.key)}
-                className={`px-2.5 py-1 text-[10px] font-bold rounded-full transition-all click-press ${
-                  lang === l.key
-                    ? "bg-gradient-to-r from-df-accent to-df-accent-secondary text-white shadow"
-                    : "text-df-text-secondary hover:text-df-text"
-                } min-h-7`}
+                key={option.key}
+                type="button"
+                onClick={() => setLang(option.key)}
+                className={`flex h-8 min-w-8 items-center justify-center rounded-md px-2.5 text-[11px] font-semibold transition-colors click-press ${
+                  lang === option.key
+                    ? "bg-df-surface-solid/45 text-df-text shadow-[inset_0_0_0_1px_rgba(102,117,255,0.26)]"
+                    : "text-df-text-secondary hover:bg-df-surface-solid/25 hover:text-df-text"
+                }`}
               >
-                {l.label}
+                {option.label}
               </button>
             ))}
           </div>
-
-          {/* Theme toggle */}
-          <div className="ml-auto flex items-center gap-1 rounded-full bg-df-surface-solid/30 p-1">
-            {(
-              [
-                { key: "light" as const, icon: Sun },
-                { key: "dark" as const, icon: Moon },
-                { key: "auto" as const, icon: Monitor },
-              ] as const
-            ).map((mode) => {
-              const Icon = mode.icon;
-              const isActive = theme === mode.key;
+          <div className="flex shrink-0 items-center gap-1.5">
+            {themeOptions.map((option) => {
+              const Icon = option.icon;
+              const selected = theme === option.key;
               return (
                 <button
-                  key={mode.key}
-                  onClick={() => setTheme(mode.key)}
-                  title={t(lang, `theme${mode.key.charAt(0).toUpperCase() + mode.key.slice(1)}` as any)}
-                  className={`flex h-7 w-7 items-center justify-center rounded-full transition-all click-press ${
-                    isActive
-                      ? "bg-df-accent/20 text-df-accent"
-                      : "text-df-text-secondary hover:text-df-text"
+                  key={option.key}
+                  type="button"
+                  onClick={() => setTheme(option.key)}
+                  title={option.label}
+                  aria-label={option.label}
+                  className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors click-press ${
+                    selected
+                      ? "bg-df-surface-solid/35 text-df-text"
+                      : "text-df-text-secondary hover:bg-df-surface-solid/25 hover:text-df-text"
                   }`}
                 >
-                  {mounted ? <Icon size={14} /> : <span className="h-3.5 w-3.5" />}
+                  {mounted ? <Icon size={17} /> : <span className="h-[17px] w-[17px]" />}
                 </button>
               );
             })}
@@ -324,8 +329,7 @@ export default function Sidebar(props: SidebarProps) {
         </div>
       </div>
 
-      {/* Content */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
         {error && (
           <div className="mb-4 p-3 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 text-red-700 dark:text-red-300 text-sm flex items-start gap-2">
             <AlertCircle size={16} className="shrink-0 mt-0.5" />
@@ -455,6 +459,7 @@ export default function Sidebar(props: SidebarProps) {
                     min={0}
                     max={100}
                     value={val}
+                    style={sliderProgressStyle(val, 0, 100)}
                     onChange={(e) =>
                       handleWeightChange(i, Number(e.target.value))
                     }
@@ -509,6 +514,7 @@ export default function Sidebar(props: SidebarProps) {
                 max={5}
                 step={0.5}
                 value={leverage}
+                style={sliderProgressStyle(leverage, 1, 5)}
                 onChange={(e) => setLeverage(Number(e.target.value))}
                 className="w-full df-slider accent-df-accent cursor-pointer"
               />
@@ -527,7 +533,7 @@ export default function Sidebar(props: SidebarProps) {
                 onClick={() => setTimeWindow(opt)}
                 className={`min-h-9 px-3 py-1.5 text-xs font-semibold rounded-full transition-all click-press ${
                   timeWindow === opt
-                    ? "bg-gradient-to-r from-df-accent to-df-accent-secondary text-white shadow"
+                    ? "df-pill-active"
                     : "df-pill-inactive text-df-text-secondary hover:text-df-text hover:border-df-accent/40"
                 }`}
               >
@@ -544,6 +550,7 @@ export default function Sidebar(props: SidebarProps) {
             max={50000}
             step={1000}
             value={mcPaths}
+            style={sliderProgressStyle(mcPaths, 1000, 50000)}
             onChange={(e) => setMcPaths(Number(e.target.value))}
             className="w-full df-slider accent-df-accent cursor-pointer"
           />
@@ -565,7 +572,7 @@ export default function Sidebar(props: SidebarProps) {
                 onClick={() => setAllocationMode(mode.key)}
                 className={`min-h-10 px-3 py-2 text-xs font-semibold rounded-full transition-all click-press ${
                   allocationMode === mode.key
-                    ? "bg-gradient-to-r from-df-accent to-df-accent-secondary text-white shadow"
+                    ? "df-pill-active"
                     : "df-pill-inactive text-df-text-secondary hover:text-df-text hover:border-df-accent/40"
                 }`}
               >
@@ -589,6 +596,7 @@ export default function Sidebar(props: SidebarProps) {
                 min={10}
                 max={100}
                 value={Math.round(maxWeight * 100)}
+                style={sliderProgressStyle(Math.round(maxWeight * 100), 10, 100)}
                 onChange={(e) => setMaxWeight(Number(e.target.value) / 100)}
                 className="w-full df-slider accent-df-accent cursor-pointer"
               />
@@ -605,6 +613,7 @@ export default function Sidebar(props: SidebarProps) {
                 max={10}
                 step={0.5}
                 value={minWeight * 100}
+                style={sliderProgressStyle(minWeight * 100, 0, 10)}
                 onChange={(e) => setMinWeight(Number(e.target.value) / 100)}
                 className="w-full df-slider accent-df-accent cursor-pointer"
               />
@@ -621,6 +630,7 @@ export default function Sidebar(props: SidebarProps) {
                 max={0.05}
                 step={0.005}
                 value={turnoverPenalty}
+                style={sliderProgressStyle(turnoverPenalty, 0, 0.05)}
                 onChange={(e) => setTurnoverPenalty(Number(e.target.value))}
                 className="w-full df-slider accent-df-accent cursor-pointer"
               />
@@ -637,6 +647,7 @@ export default function Sidebar(props: SidebarProps) {
                 max={0.05}
                 step={0.005}
                 value={concentrationPenalty}
+                style={sliderProgressStyle(concentrationPenalty, 0, 0.05)}
                 onChange={(e) => setConcentrationPenalty(Number(e.target.value))}
                 className="w-full df-slider accent-df-accent cursor-pointer"
               />
@@ -653,7 +664,7 @@ export default function Sidebar(props: SidebarProps) {
               type="checkbox"
               checked={backtestEnabled}
               onChange={(e) => setBacktestEnabled(e.target.checked)}
-              className="accent-df-accent w-4 h-4 rounded"
+              className="df-checkbox accent-df-accent w-4 h-4 rounded"
             />
             <span className="text-df-text-secondary">
               {t(lang, "enableBacktest")}
@@ -666,7 +677,7 @@ export default function Sidebar(props: SidebarProps) {
                   type="checkbox"
                   checked={oosGuardEnabled}
                   onChange={(e) => setOosGuardEnabled(e.target.checked)}
-                  className="accent-df-accent w-4 h-4 rounded"
+                  className="df-checkbox accent-df-accent w-4 h-4 rounded"
                 />
                 <span className="text-df-text-secondary" title={t(lang, "oosGuardHelp")}>
                   {t(lang, "oosGuard")}
@@ -685,6 +696,7 @@ export default function Sidebar(props: SidebarProps) {
                   min={10}
                   max={30}
                   value={Math.round(testRatio * 100)}
+                  style={sliderProgressStyle(Math.round(testRatio * 100), 10, 30)}
                   onChange={(e) =>
                     setTestRatio(Number(e.target.value) / 100)
                   }
@@ -706,7 +718,7 @@ export default function Sidebar(props: SidebarProps) {
                 onClick={() => setMlHorizon(days)}
                 className={`min-h-10 px-3 py-2 text-xs font-semibold rounded-full transition-all click-press ${
                   mlHorizon === days
-                    ? "bg-gradient-to-r from-df-accent to-df-accent-secondary text-white shadow"
+                    ? "df-pill-active"
                     : "df-pill-inactive text-df-text-secondary hover:text-df-text hover:border-df-accent/40"
                 }`}
               >
@@ -773,6 +785,7 @@ export default function Sidebar(props: SidebarProps) {
                   max={1.0}
                   step={0.1}
                   value={viewConfidence}
+                  style={sliderProgressStyle(viewConfidence, 0.1, 1)}
                   onChange={(e) =>
                     setViewConfidence(Number(e.target.value))
                   }
@@ -802,24 +815,25 @@ export default function Sidebar(props: SidebarProps) {
               type="checkbox"
               checked={allowSandboxData}
               onChange={(e) => setAllowSandboxData(e.target.checked)}
-              className="accent-df-accent w-4 h-4 rounded"
+              className="df-checkbox accent-df-accent w-4 h-4 rounded"
             />
             <span className="text-df-text-secondary">
               {t(lang, "allowSandboxData")}
             </span>
           </label>
         </AccordionSection>
-
       </div>
 
-      {/* Run Button */}
-      <div className="shrink-0 border-t border-df-border p-4 sm:p-5">
-        <GradientButton onClick={onRun} disabled={loading}>
-          <span className="flex items-center justify-center gap-2">
-            <Play size={16} />
-            {loading ? t(lang, "analyzing") : t(lang, "runAnalysis")}
-          </span>
-        </GradientButton>
+      <div className="shrink-0 border-t border-df-border bg-[rgba(252,252,252,0.96)] p-3 shadow-[0_-18px_34px_-32px_rgba(15,23,42,0.28)] dark:bg-[rgba(12,15,15,0.96)] dark:shadow-[0_-18px_38px_-32px_rgba(0,0,0,0.95)]">
+        <button
+          type="button"
+          onClick={onRun}
+          disabled={loading}
+          className="flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-df-accent to-df-accent-dim px-4 text-sm font-semibold text-white shadow-[0_16px_34px_-20px_rgba(79,109,255,0.9)] transition-opacity disabled:cursor-not-allowed disabled:opacity-60 click-press"
+        >
+          <Play size={16} />
+          {loading ? t(lang, "analyzing") : t(lang, "runAnalysis")}
+        </button>
       </div>
     </aside>
   );

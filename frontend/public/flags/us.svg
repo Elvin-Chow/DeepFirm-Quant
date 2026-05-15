@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 60">
+  <rect width="90" height="60" fill="#b22234"/>
+  <g fill="#fff">
+    <rect y="4.615" width="90" height="4.615"/>
+    <rect y="13.846" width="90" height="4.615"/>
+    <rect y="23.077" width="90" height="4.615"/>
+    <rect y="32.308" width="90" height="4.615"/>
+    <rect y="41.538" width="90" height="4.615"/>
+    <rect y="50.769" width="90" height="4.615"/>
+  </g>
+  <rect width="36" height="32.3" fill="#3c3b6e"/>
+  <g fill="#fff">
+    <circle cx="4" cy="3.5" r="0.8"/>
+    <circle cx="10" cy="3.5" r="0.8"/>
+    <circle cx="16" cy="3.5" r="0.8"/>
+    <circle cx="22" cy="3.5" r="0.8"/>
+    <circle cx="28" cy="3.5" r="0.8"/>
+    <circle cx="34" cy="3.5" r="0.8"/>
+    <circle cx="7" cy="7" r="0.8"/>
+    <circle cx="13" cy="7" r="0.8"/>
+    <circle cx="19" cy="7" r="0.8"/>
+    <circle cx="25" cy="7" r="0.8"/>
+    <circle cx="31" cy="7" r="0.8"/>
+    <circle cx="4" cy="10.5" r="0.8"/>
+    <circle cx="10" cy="10.5" r="0.8"/>
+    <circle cx="16" cy="10.5" r="0.8"/>
+    <circle cx="22" cy="10.5" r="0.8"/>
+    <circle cx="28" cy="10.5" r="0.8"/>
+    <circle cx="34" cy="10.5" r="0.8"/>
+    <circle cx="7" cy="14" r="0.8"/>
+    <circle cx="13" cy="14" r="0.8"/>
+    <circle cx="19" cy="14" r="0.8"/>
+    <circle cx="25" cy="14" r="0.8"/>
+    <circle cx="31" cy="14" r="0.8"/>
+    <circle cx="4" cy="17.5" r="0.8"/>
+    <circle cx="10" cy="17.5" r="0.8"/>
+    <circle cx="16" cy="17.5" r="0.8"/>
+    <circle cx="22" cy="17.5" r="0.8"/>
+    <circle cx="28" cy="17.5" r="0.8"/>
+    <circle cx="34" cy="17.5" r="0.8"/>
+    <circle cx="7" cy="21" r="0.8"/>
+    <circle cx="13" cy="21" r="0.8"/>
+    <circle cx="19" cy="21" r="0.8"/>
+    <circle cx="25" cy="21" r="0.8"/>
+    <circle cx="31" cy="21" r="0.8"/>
+    <circle cx="4" cy="24.5" r="0.8"/>
+    <circle cx="10" cy="24.5" r="0.8"/>
+    <circle cx="16" cy="24.5" r="0.8"/>
+    <circle cx="22" cy="24.5" r="0.8"/>
+    <circle cx="28" cy="24.5" r="0.8"/>
+    <circle cx="34" cy="24.5" r="0.8"/>
+    <circle cx="7" cy="28" r="0.8"/>
+    <circle cx="13" cy="28" r="0.8"/>
+    <circle cx="19" cy="28" r="0.8"/>
+    <circle cx="25" cy="28" r="0.8"/>
+    <circle cx="31" cy="28" r="0.8"/>
+  </g>
+</svg>
