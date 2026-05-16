@@ -159,6 +159,21 @@ export function localizeWarning(message: string, lang: Lang): string {
       "中国 A 股因子归因暂未接入。",
       "中國 A 股因子歸因暫未接入。",
     ],
+    "Japan market factor attribution is not supported yet.": [
+      "Japan market factor attribution is not supported yet.",
+      "日本市场因子归因暂未接入。",
+      "日本市場因子歸因暫未接入。",
+    ],
+    "Taiwan market factor attribution is not supported yet.": [
+      "Taiwan market factor attribution is not supported yet.",
+      "台湾市场因子归因暂未接入。",
+      "台灣市場因子歸因暫未接入。",
+    ],
+    "Taiwan risk-free rate live source is unavailable; defaulted to 2.00% annualized.": [
+      "Taiwan risk-free rate live source is unavailable; defaulted to 2.00% annualized.",
+      "台湾无风险利率实时来源暂不可用，已使用 2.00% 年化兜底值。",
+      "台灣無風險利率即時來源暫不可用，已使用 2.00% 年化兜底值。",
+    ],
     "real factors unavailable": [
       "Real factors unavailable.",
       "真实因子数据不可用。",

@@ -282,8 +282,24 @@ class MLRiskEngine:
         return max(tail_mean - threshold, 0.0)
 
     @staticmethod
-    def _risk_score(es_loss: float) -> Tuple[int, RiskLevel]:
-        score = int(round(float(np.clip(es_loss / 0.06 * 100.0, 0.0, 100.0))))
+    def _historical_es(losses: pd.Series, confidence_level: float) -> float:
+        clean_losses = losses.replace([np.inf, -np.inf], np.nan).dropna()
+        if clean_losses.empty:
+            return 0.0
+
+        threshold = float(clean_losses.quantile(confidence_level))
+        tail_losses = clean_losses[clean_losses >= threshold]
+        if tail_losses.empty:
+            return max(threshold, 0.0)
+        return max(float(tail_losses.mean()), threshold, 0.0)
+
+    @staticmethod
+    def _risk_score(es_loss: float, reference_loss: Optional[float] = None) -> Tuple[int, RiskLevel]:
+        reference_scale = 0.0
+        if reference_loss is not None and np.isfinite(reference_loss) and reference_loss > 0.0:
+            reference_scale = float(reference_loss) * 1.25
+        score_scale = max(0.06, reference_scale)
+        score = int(round(float(np.clip(es_loss / score_scale * 100.0, 0.0, 100.0))))
         if score <= 30:
             level: RiskLevel = "Low"
         elif score <= 60:
@@ -407,7 +423,8 @@ class MLRiskEngine:
                 es_loss = max(float(tail.mean()) if not tail.empty else var_loss, var_loss)
             n_observations = len(asset_returns)
 
-        score, level = cls._risk_score(es_loss)
+        reference_loss = cls._historical_es(losses, confidence_level)
+        score, level = cls._risk_score(es_loss, reference_loss=reference_loss)
         diagnostics = diagnostics_from_frame(
             model_name="HistoricalFallback",
             model_version=cls.model_version,
@@ -486,7 +503,8 @@ class MLRiskEngine:
         var_loss = max(predicted_loss, 0.0)
         es_loss = var_loss + self._tail_excess(training["future_loss"], confidence_level)
         es_loss = max(es_loss, var_loss)
-        score, level = self._risk_score(es_loss)
+        reference_loss = self._historical_es(training["future_loss"], confidence_level)
+        score, level = self._risk_score(es_loss, reference_loss=reference_loss)
         calibration_error = calibration.get("calibration_error", 0.0)
         warnings: List[str] = []
         if calibration_error > 0.10:

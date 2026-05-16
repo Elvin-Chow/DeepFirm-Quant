@@ -57,7 +57,7 @@ crisis_warning_service = analysis_service.crisis_warning_service
 app = FastAPI(
     title="DeepFirm Quant",
     description="Industrial-grade quant risk and decision engine",
-    version="4.0.0",
+    version="4.1.0",
 )
 
 app.add_middleware(
@@ -136,7 +136,7 @@ async def health_check() -> dict[str, str]:
 @app.get("/api/v1/market/snapshot", response_model=MarketSnapshotResult)
 async def get_market_snapshot(market: str = "us", force_refresh: bool = False) -> MarketSnapshotResult:
     """Return a compact market status and index snapshot for the landing page."""
-    if market not in {"us", "hk", "cn", "mixed"}:
+    if market not in {"us", "hk", "cn", "jp", "tw"}:
         raise HTTPException(status_code=400, detail=f"unsupported market: {market}")
 
     fetcher = _make_fetcher(api_key=None, allow_sandbox_data=False)
@@ -303,6 +303,10 @@ async def fama_french_alpha(payload: AlphaAnalysisRequest) -> FactorRegressionRe
     try:
         if payload.market == "cn":
             raise ValueError("China A-share factor attribution is not supported yet.")
+        if payload.market == "jp":
+            raise ValueError("Japan market factor attribution is not supported yet.")
+        if payload.market == "tw":
+            raise ValueError("Taiwan market factor attribution is not supported yet.")
         fetcher = _make_fetcher(payload.api_key, payload.allow_sandbox_data)
         engine = RiskEngine(fetcher=fetcher, aligner=aligner)
         price_df = await _run_blocking_operation(

@@ -258,6 +258,43 @@ class FetcherCacheTests(unittest.TestCase):
 
         self.assertIsNone(cached)
 
+    def test_us_cache_one_business_day_short_misses_normal_read(self) -> None:
+        prices = pd.DataFrame(
+            {
+                "Date": pd.date_range("2026-05-01", "2026-05-14", freq="B"),
+                "Close": np.linspace(100.0, 110.0, 10),
+            }
+        )
+
+        with TemporaryDirectory() as tmp_dir:
+            fetcher = SmartFetcher(cache_name=f"{tmp_dir}/http_cache")
+            fetcher._write_result_cache(
+                prices,
+                "us_equity",
+                "AAA",
+                date(2026, 5, 1),
+                date(2026, 5, 16),
+                provider="yahoo_chart",
+            )
+
+            cached = fetcher._read_result_cache(
+                "us_equity",
+                "AAA",
+                date(2026, 5, 1),
+                date(2026, 5, 16),
+            )
+            stale_cached = fetcher._read_price_cache(
+                "us_equity",
+                "AAA",
+                date(2026, 5, 1),
+                date(2026, 5, 16),
+                allow_stale=True,
+                allow_partial=True,
+            )
+
+        self.assertIsNone(cached)
+        self.assertIsNotNone(stale_cached)
+
     def test_incomplete_symbol_cache_falls_through_to_exact_window_cache(self) -> None:
         short_prices = pd.DataFrame(
             {

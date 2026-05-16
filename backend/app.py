@@ -82,7 +82,7 @@ class LazyBackendApp:
 app = FastAPI(
     title="DeepFirm Quant",
     description="Industrial-grade quant risk and decision engine",
-    version="4.0.0",
+    version="4.1.0",
 )
 
 app.add_middleware(

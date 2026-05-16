@@ -1,4 +1,4 @@
-export type MarketMode = "us" | "hk" | "cn" | "mixed";
+export type MarketMode = "us" | "hk" | "cn" | "jp" | "tw";
 
 export type MarketSessionStatus = "open" | "lunch_break" | "closed" | "unknown";
 export type MarketIndexStatus = "ok" | "unavailable";

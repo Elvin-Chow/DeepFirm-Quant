@@ -13,7 +13,7 @@ import backend.app as hosted_entrypoint
 from backend import main as api
 from backend.cors import configured_origin_regex
 from models import ViewSpec
-from models.risk_engine import RiskEngine
+from models.risk_engine import RiskEngine, RiskEvaluationRequest, RiskEvaluationResult
 
 
 class PerformanceMetricTests(unittest.TestCase):
@@ -57,26 +57,58 @@ class ApiContractTests(unittest.TestCase):
                 views=[ViewSpec(assets=["BBB"], expected_return=0.05)],
             )
 
-    def test_mixed_backtest_exposes_benchmark_and_risk_free_fallback(self) -> None:
+    def test_backtest_uses_market_specific_benchmark_and_risk_free_fallback(self) -> None:
         dates = pd.date_range("2026-01-01", periods=90, freq="B")
-        price_df = pd.DataFrame(
-            {
-                "AAA": 100.0 * np.exp(np.linspace(0.00, 0.08, len(dates))),
-                "BBB": 120.0 * np.exp(np.linspace(0.00, 0.05, len(dates))),
-            },
-            index=dates,
-        )
         benchmark_df = pd.DataFrame(
             {
                 "Date": dates,
                 "Close": 100.0 * np.exp(np.linspace(0.00, 0.04, len(dates))),
             }
         )
+        market_cases = {
+            "us": {
+                "tickers": ["AAA", "BBB"],
+                "expected_symbol": "SPY",
+                "expected_name": "SPDR S&P 500 ETF Trust",
+                "expected_risk_free_detail": "Deterministic fallback (2.00% annualized)",
+                "expected_warning_fragment": "Risk-free rate",
+            },
+            "hk": {
+                "tickers": ["0005.HK", "0007.HK"],
+                "expected_symbol": "^HSI",
+                "expected_name": "Hang Seng Index",
+                "expected_risk_free_detail": "HKMA 91-day Exchange Fund Bills fallback (2.00% annualized)",
+                "expected_warning_fragment": "Hong Kong risk-free rate",
+            },
+            "cn": {
+                "tickers": ["600519", "000001"],
+                "expected_symbol": "000300",
+                "expected_name": "CSI 300 Index",
+                "expected_risk_free_detail": "ChinaBond 3-month government bond yield fallback (2.00% annualized)",
+                "expected_warning_fragment": "China A-share risk-free rate",
+            },
+            "jp": {
+                "tickers": ["7203.T", "6758.T"],
+                "expected_symbol": "^N225",
+                "expected_name": "Nikkei 225",
+                "expected_risk_free_detail": "Tokyo Overnight Average Rate proxy fallback (0.75% annualized)",
+                "expected_warning_fragment": "Japan risk-free rate",
+                "expected_risk_free_rate": 0.0075,
+            },
+            "tw": {
+                "tickers": ["2330.TW", "2317.TW"],
+                "expected_symbol": "^TWII",
+                "expected_name": "TAIEX",
+                "expected_risk_free_detail": "Central Bank of the Republic of China discount rate fallback (2.00% annualized)",
+                "expected_warning_fragment": "Taiwan risk-free rate",
+            },
+        }
 
         class FakeFetcher:
             last_source = "cache"
             last_source_detail = "cache (test)"
             data_warnings: list[str] = []
+            allow_sandbox_data = False
 
             def fetch_us_equity(self, symbol, start_date, end_date):
                 if symbol == "^IRX":
@@ -85,36 +117,205 @@ class ApiContractTests(unittest.TestCase):
                 self.last_source_detail = symbol
                 return SimpleNamespace(data=benchmark_df)
 
-        payload = api.PortfolioOptimizeRequest(
-            tickers=["AAA", "BBB"],
-            start_date=date(2026, 1, 1),
-            end_date=date(2026, 5, 15),
-            weights=[0.5, 0.5],
-            market="mixed",
-            backtest_enabled=True,
-            risk_free_rate=None,
-            use_market_cap_prior=False,
+        def fake_benchmark(fetcher, symbol, start_date, end_date, market):
+            fetcher.last_source = "benchmark"
+            fetcher.last_source_detail = symbol
+            return benchmark_df
+
+        def fake_risk_free(fetcher, requested_rate, asof=None, market="us"):
+            config = market_cases[market]
+            return (
+                config.get("expected_risk_free_rate", 0.02),
+                "fallback",
+                config["expected_risk_free_detail"],
+                [f"{config['expected_warning_fragment']} was unavailable; defaulted for test."],
+            )
+
+        for market, config in market_cases.items():
+            with self.subTest(market=market):
+                tickers = config["tickers"]
+                price_df = pd.DataFrame(
+                    {
+                        tickers[0]: 100.0 * np.exp(np.linspace(0.00, 0.08, len(dates))),
+                        tickers[1]: 120.0 * np.exp(np.linspace(0.00, 0.05, len(dates))),
+                    },
+                    index=dates,
+                )
+                payload = api.PortfolioOptimizeRequest(
+                    tickers=tickers,
+                    start_date=date(2026, 1, 1),
+                    end_date=date(2026, 5, 15),
+                    weights=[0.5, 0.5],
+                    market=market,
+                    backtest_enabled=True,
+                    risk_free_rate=None,
+                    use_market_cap_prior=False,
+                )
+
+                with patch.object(
+                    api.analysis_service,
+                    "fetch_benchmark_prices",
+                    side_effect=fake_benchmark,
+                ), patch.object(
+                    api.analysis_service,
+                    "resolve_risk_free_rate",
+                    side_effect=fake_risk_free,
+                ):
+                    result = api.analysis_service.optimize_portfolio_from_prices(
+                        payload,
+                        FakeFetcher(),
+                        price_df,
+                        portfolio_source="cache",
+                        portfolio_source_detail="cache (test)",
+                    )
+
+                self.assertEqual(result.benchmark_symbol, config["expected_symbol"])
+                self.assertEqual(result.benchmark_name, config["expected_name"])
+                self.assertEqual(result.benchmark_source, "benchmark")
+                self.assertEqual(result.benchmark_source_detail, config["expected_symbol"])
+                self.assertEqual(result.risk_free_rate_source, "fallback")
+                self.assertEqual(
+                    result.risk_free_rate_source_detail,
+                    config["expected_risk_free_detail"],
+                )
+                self.assertAlmostEqual(result.risk_free_rate, config.get("expected_risk_free_rate", 0.02))
+                self.assertTrue(
+                    any(
+                        config["expected_warning_fragment"] in warning
+                        for warning in result.methodology_warnings
+                    )
+                )
+
+    def test_risk_evaluation_uses_market_specific_benchmark_and_risk_free_curve(self) -> None:
+        dates = pd.date_range("2026-01-01", periods=30, freq="B")
+        benchmark_df = pd.DataFrame(
+            {
+                "Date": dates,
+                "Close": 100.0 * np.exp(np.linspace(0.00, 0.03, len(dates))),
+            }
         )
 
-        result = api.analysis_service.optimize_portfolio_from_prices(
-            payload,
-            FakeFetcher(),
-            price_df,
-            portfolio_source="cache",
-            portfolio_source_detail="cache (test)",
+        class FakeFetcher:
+            last_source = "benchmark"
+            last_source_detail = "benchmark detail"
+            data_warnings: list[str] = []
+            allow_sandbox_data = False
+
+        market_cases = {
+            "hk": {
+                "tickers": ["0005.HK", "0007.HK"],
+                "expected_symbol": "^HSI",
+                "expected_name": "Hang Seng Index",
+                "expected_risk_free_symbol": "HKMA_EFB_91D",
+                "expected_risk_free_name": "HKD 91D EFB",
+                "risk_free_source": "hkma",
+                "risk_free_detail": "HKMA 91-day Exchange Fund Bills yield",
+            },
+            "cn": {
+                "tickers": ["600519", "000001"],
+                "expected_symbol": "000300",
+                "expected_name": "CSI 300 Index",
+                "expected_risk_free_symbol": "CHINABOND_CGB_3M",
+                "expected_risk_free_name": "CNY 3M CGB",
+                "risk_free_source": "chinabond",
+                "risk_free_detail": "ChinaBond 3-month government bond yield",
+            },
+            "tw": {
+                "tickers": ["2330.TW", "2317.TW"],
+                "expected_symbol": "^TWII",
+                "expected_name": "TAIEX",
+                "expected_risk_free_symbol": "CBC_DISCOUNT_RATE",
+                "expected_risk_free_name": "TWD policy rate",
+                "risk_free_source": "fallback",
+                "risk_free_detail": "Central Bank of the Republic of China discount rate fallback (2.00% annualized)",
+            },
+        }
+
+        def fake_benchmark(fetcher, symbol, start_date, end_date, market):
+            fetcher.last_source = "benchmark"
+            fetcher.last_source_detail = symbol
+            return benchmark_df
+
+        def fake_risk_free(fetcher, requested_rate, asof=None, market="us"):
+            config = market_cases[market]
+            return 0.02, config["risk_free_source"], config["risk_free_detail"], []
+
+        for market, config in market_cases.items():
+            with self.subTest(market=market):
+                tickers = config["tickers"]
+                price_df = pd.DataFrame(
+                    {
+                        tickers[0]: 100.0 * np.exp(np.linspace(0.00, 0.05, len(dates))),
+                        tickers[1]: 100.0 * np.exp(np.linspace(0.00, 0.02, len(dates))),
+                    },
+                    index=dates,
+                )
+                request = RiskEvaluationRequest(
+                    tickers=tickers,
+                    start_date=date(2026, 1, 1),
+                    end_date=date(2026, 2, 15),
+                    weights=[0.5, 0.5],
+                    market=market,
+                )
+                result = RiskEvaluationResult(
+                    tickers=tickers,
+                    historical_es=-0.01,
+                    monte_carlo_es=-0.01,
+                    confidence_level=0.99,
+                    cumulative_returns=[0.0] * (len(dates) - 1),
+                    performance_dates=dates[1:].strftime("%Y-%m-%d").tolist(),
+                )
+
+                with patch.object(
+                    api.analysis_service,
+                    "make_fetcher",
+                    side_effect=lambda api_key, allow_sandbox_data: FakeFetcher(),
+                ), patch.object(
+                    api.analysis_service,
+                    "fetch_benchmark_prices",
+                    side_effect=fake_benchmark,
+                ), patch.object(
+                    api.analysis_service,
+                    "resolve_risk_free_rate",
+                    side_effect=fake_risk_free,
+                ):
+                    api.analysis_service.attach_risk_benchmark(result, request, price_df)
+
+                self.assertEqual(result.benchmark_symbol, config["expected_symbol"])
+                self.assertEqual(result.benchmark_name, config["expected_name"])
+                self.assertEqual(result.benchmark_source_detail, config["expected_symbol"])
+                self.assertGreater(len(result.benchmark_cumulative_returns), 0)
+                self.assertEqual(result.risk_free_symbol, config["expected_risk_free_symbol"])
+                self.assertEqual(result.risk_free_name, config["expected_risk_free_name"])
+                self.assertEqual(result.risk_free_source, config["risk_free_source"])
+                self.assertEqual(result.risk_free_source_detail, config["risk_free_detail"])
+                self.assertEqual(len(result.risk_free_cumulative_returns), len(dates) - 1)
+
+    def test_hk_benchmark_fetch_uses_hk_equity_path(self) -> None:
+        dates = pd.date_range("2026-01-01", periods=3, freq="B")
+
+        class FakeFetcher:
+            called_hk = False
+
+            def fetch_hk_equity(self, symbol, start_date, end_date):
+                self.called_hk = True
+                return SimpleNamespace(data=pd.DataFrame({"Date": dates, "Close": [100.0, 101.0, 102.0]}))
+
+            def fetch_us_equity(self, symbol, start_date, end_date):
+                raise AssertionError("HK benchmark must not use the US equity path")
+
+        fetcher = FakeFetcher()
+
+        df = api.analysis_service.fetch_benchmark_prices(
+            fetcher,
+            "^HSI",
+            date(2026, 1, 1),
+            date(2026, 1, 5),
+            "hk",
         )
 
-        self.assertEqual(result.benchmark_symbol, "ACWI")
-        self.assertEqual(result.benchmark_name, "iShares MSCI ACWI ETF")
-        self.assertEqual(result.benchmark_source, "benchmark")
-        self.assertEqual(result.benchmark_source_detail, "ACWI")
-        self.assertEqual(result.risk_free_rate_source, "fallback")
-        self.assertEqual(
-            result.risk_free_rate_source_detail,
-            "Deterministic fallback (2.00% annualized)",
-        )
-        self.assertAlmostEqual(result.risk_free_rate, 0.02)
-        self.assertTrue(any("Risk-free rate" in warning for warning in result.methodology_warnings))
+        self.assertTrue(fetcher.called_hk)
+        self.assertEqual(list(df.columns), ["Date", "Close"])
 
 
 class CorsContractTests(unittest.TestCase):

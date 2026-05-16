@@ -27,6 +27,11 @@ class IndexConfig:
     name: str
     name_zh: str
     name_tc: str
+    provider_symbol: str | None = None
+
+    @property
+    def fetch_symbol(self) -> str:
+        return self.provider_symbol or self.symbol
 
 
 INDEX_CONFIGS: Dict[MarketMode, Tuple[IndexConfig, ...]] = {
@@ -45,11 +50,15 @@ INDEX_CONFIGS: Dict[MarketMode, Tuple[IndexConfig, ...]] = {
         IndexConfig("399001.SZ", "Shenzhen Component", "深证成指", "深證成指"),
         IndexConfig("000300.SS", "CSI 300", "沪深 300", "滬深 300"),
     ),
-    "mixed": (
-        IndexConfig("^GSPC", "S&P 500", "标普 500", "標普 500"),
-        IndexConfig("^IXIC", "Nasdaq Composite", "纳斯达克综合指数", "納斯達克綜合指數"),
-        IndexConfig("^HSI", "Hang Seng Index", "恒生指数", "恆生指數"),
-        IndexConfig("HSTECH.HK", "Hang Seng TECH Index", "恒生科技指数", "恆生科技指數"),
+    "jp": (
+        IndexConfig("^N225", "Nikkei 225", "日经 225", "日經 225"),
+        IndexConfig("TOPIX", "TOPIX", "东证指数", "東證指數", provider_symbol="1306.T"),
+        IndexConfig("JPX400", "JPX-Nikkei 400", "JPX 日经 400", "JPX 日經 400", provider_symbol="1592.T"),
+    ),
+    "tw": (
+        IndexConfig("^TWII", "TAIEX", "台湾加权指数", "台灣加權指數"),
+        IndexConfig("^TSE50", "FTSE TWSE Taiwan 50", "台湾 50 指数", "台灣 50 指數"),
+        IndexConfig("^TELI", "TWSE Electronics Index", "电子类指数", "電子類指數"),
     ),
 }
 
@@ -57,6 +66,8 @@ SESSION_WINDOWS: Dict[str, Tuple[str, Tuple[Tuple[time, time], ...]]] = {
     "us": ("America/New_York", ((time(9, 30), time(16, 0)),)),
     "hk": ("Asia/Hong_Kong", ((time(9, 30), time(12, 0)), (time(13, 0), time(16, 0)))),
     "cn": ("Asia/Shanghai", ((time(9, 30), time(11, 30)), (time(13, 0), time(15, 0)))),
+    "jp": ("Asia/Tokyo", ((time(9, 0), time(11, 30)), (time(12, 30), time(15, 30)))),
+    "tw": ("Asia/Taipei", ((time(9, 0), time(13, 30)),)),
 }
 
 
@@ -91,24 +102,10 @@ def _regular_session_status(
     return "closed", timezone_name, local_now.isoformat(timespec="minutes")
 
 
-def _mixed_session_status(now_utc: datetime) -> tuple[MarketSessionStatus, str, str]:
-    hk_status, _, hk_time = _regular_session_status("hk", now_utc)
-    us_status, _, us_time = _regular_session_status("us", now_utc)
-    if "open" in {hk_status, us_status}:
-        status: MarketSessionStatus = "open"
-    elif "lunch_break" in {hk_status, us_status}:
-        status = "lunch_break"
-    else:
-        status = "closed"
-    return status, "Asia/Hong_Kong + America/New_York", f"HK {hk_time} / NY {us_time}"
-
-
 def _session_status(
     market: MarketMode,
     now_utc: datetime,
 ) -> tuple[MarketSessionStatus, str, str]:
-    if market == "mixed":
-        return _mixed_session_status(now_utc)
     return _regular_session_status(market, now_utc)
 
 
@@ -168,7 +165,7 @@ def _fetch_yahoo_chart_meta(
 ) -> dict:
     session = getattr(fetcher, "_session", requests.Session())
     normalize_symbol = getattr(fetcher, "_normalize_yf_symbol", lambda symbol: symbol)
-    yf_symbol = normalize_symbol(config.symbol)
+    yf_symbol = normalize_symbol(config.fetch_symbol)
     params = {
         "period1": SmartFetcher._unix_timestamp(start_date),
         "period2": SmartFetcher._unix_timestamp(end_date, end_of_day=True),
@@ -251,7 +248,7 @@ def _fetch_yahoo_intraday_trend(
         return []
 
     normalize_symbol = getattr(fetcher, "_normalize_yf_symbol", lambda symbol: symbol)
-    yf_symbol = normalize_symbol(config.symbol)
+    yf_symbol = normalize_symbol(config.fetch_symbol)
     params = {
         "range": "1d",
         "interval": "5m",
@@ -319,7 +316,7 @@ def _meta_previous_price(meta: dict) -> float | None:
     return None
 
 
-def _meta_quote_time(meta: dict) -> str | None:
+def _meta_quote_datetime(meta: dict) -> datetime | None:
     value = _meta_number(meta, "regularMarketTime")
     if value is None:
         return None
@@ -334,19 +331,32 @@ def _meta_quote_time(meta: dict) -> str | None:
             timestamp = timestamp.astimezone(ZoneInfo(timezone_name))
         except Exception:
             timestamp = timestamp.astimezone(timezone.utc)
+    return timestamp
+
+
+def _meta_quote_time(meta: dict) -> str | None:
+    timestamp = _meta_quote_datetime(meta)
+    if timestamp is None:
+        return None
     return timestamp.strftime("%Y-%m-%d %H:%M")
 
 
 def _build_index_snapshot(
     config: IndexConfig,
     fetcher: SmartFetcher,
+    market: MarketMode,
     start_date,
     end_date,
     force_refresh: bool = False,
 ) -> MarketSnapshotIndex:
     try:
         trend = _fetch_yahoo_intraday_trend(config, fetcher)
-        response = fetcher.fetch_us_equity(config.symbol, start_date, end_date)
+        if market == "jp":
+            response = fetcher.fetch_jp_equity(config.fetch_symbol, start_date, end_date)
+        elif market == "tw":
+            response = fetcher.fetch_tw_equity(config.fetch_symbol, start_date, end_date)
+        else:
+            response = fetcher.fetch_us_equity(config.fetch_symbol, start_date, end_date)
         frame = _normalize_quote_frame(response.data)
         if frame.empty:
             return _build_unavailable_index(config, "No usable close prices returned.")
@@ -362,11 +372,23 @@ def _build_index_snapshot(
             meta = _fetch_yahoo_chart_meta(config, fetcher, start_date, end_date)
             meta_price = _meta_number(meta, "regularMarketPrice")
             meta_previous = _meta_previous_price(meta)
-            if meta_price is not None:
+            meta_timestamp = _meta_quote_datetime(meta)
+            latest_date = pd.Timestamp(latest["Date"]).date()
+            meta_is_current = (
+                meta_timestamp is None
+                or abs((meta_timestamp.date() - latest_date).days) <= 5
+            )
+            if meta and not meta_is_current:
+                _append_fetcher_warning(
+                    fetcher,
+                    f"{config.symbol}: ignored stale Yahoo Finance chart metadata",
+                )
+            if meta_is_current and meta_price is not None:
                 latest_price = meta_price
-            if previous_price is None and meta_previous is not None:
+            if meta_is_current and previous_price is None and meta_previous is not None:
                 previous_price = meta_previous
-            quote_time = _meta_quote_time(meta)
+            if meta_is_current:
+                quote_time = _meta_quote_time(meta)
 
         change = None
         change_percent = None
@@ -378,9 +400,11 @@ def _build_index_snapshot(
 
         source = getattr(fetcher, "last_source", "unknown")
         source_detail = getattr(fetcher, "last_source_detail", "unknown")
-        if force_refresh and meta:
+        if force_refresh and meta and quote_time is not None:
             source = "yahoo_chart"
             source_detail = "Yahoo Finance chart metadata"
+        if config.provider_symbol:
+            source_detail = f"{source_detail}; provider symbol {config.provider_symbol}"
 
         return MarketSnapshotIndex(
             symbol=config.symbol,
@@ -425,7 +449,7 @@ def build_market_snapshot(
     session_status, timezone_name, local_time = _session_status(market, current_utc)
 
     indices = [
-        _build_index_snapshot(config, fetcher, start_date, end_date, force_refresh=force_refresh)
+        _build_index_snapshot(config, fetcher, market, start_date, end_date, force_refresh=force_refresh)
         for config in INDEX_CONFIGS[market]
     ]
     source, source_detail = _source_summary(indices)

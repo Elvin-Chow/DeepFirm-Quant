@@ -27,13 +27,29 @@ def make_analysis_result(
     tickers = tickers or ["AAA", "BBB"]
     n_assets = len(tickers)
     weights = [1.0 / n_assets] * n_assets
-    benchmark_symbol = "000300" if market == "cn" else "SPY"
-    benchmark_name = "CSI 300 Index" if market == "cn" else "SPDR S&P 500 ETF Trust"
-    methodology_warnings = (
-        ["China A-share market-cap prior is unavailable; optimizer used inverse-volatility equilibrium."]
+    benchmark_symbol = (
+        "000300"
         if market == "cn"
-        else []
+        else "^N225"
+        if market == "jp"
+        else "^TWII"
+        if market == "tw"
+        else "SPY"
     )
+    benchmark_name = (
+        "CSI 300 Index"
+        if market == "cn"
+        else "Nikkei 225"
+        if market == "jp"
+        else "TAIEX"
+        if market == "tw"
+        else "SPDR S&P 500 ETF Trust"
+    )
+    methodology_warnings = []
+    if market == "cn":
+        methodology_warnings = [
+            "China A-share market-cap prior is unavailable; optimizer used inverse-volatility equilibrium."
+        ]
     risk = RiskEvaluationResult(
         tickers=tickers,
         historical_es=-0.021,
@@ -239,6 +255,70 @@ class RiskReportApiTests(unittest.TestCase):
         self.assertNotIn("inverse-volatility prior fallback", notes_text)
         self.assertEqual(report.portfolio_overview.currency, "CNY")
         self.assertEqual(report.decision_summary.benchmark_symbol, "000300")
+
+    def test_jp_report_includes_required_methodology_notes(self) -> None:
+        payload = api.RiskReportRequest(
+            tickers=["7203.T", "6758.T"],
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 5, 1),
+            weights=[0.6, 0.4],
+            market="jp",
+            risk_free_rate=0.0,
+            use_market_cap_prior=False,
+        )
+        analysis_result = make_analysis_result(
+            tickers=["7203.T", "6758.T"],
+            market="jp",
+            alpha_status="unavailable",
+            alpha_message="Japan market factor attribution is not supported yet.",
+        )
+
+        with patch.object(
+            api.analysis_service,
+            "run_analysis",
+            new=AsyncMock(return_value=analysis_result),
+        ):
+            report = asyncio.run(api.generate_risk_report(payload))
+
+        notes_text = " ".join(note.detail for note in report.methodology_notes)
+        self.assertIn("JPY", notes_text)
+        self.assertIn("^N225", notes_text)
+        self.assertIn("日本市场因子归因", notes_text)
+        self.assertNotIn("Japan market factor attribution unavailable", notes_text)
+        self.assertEqual(report.portfolio_overview.currency, "JPY")
+        self.assertEqual(report.decision_summary.benchmark_symbol, "^N225")
+
+    def test_tw_report_includes_required_methodology_notes(self) -> None:
+        payload = api.RiskReportRequest(
+            tickers=["2330.TW", "2317.TW"],
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 5, 1),
+            weights=[0.6, 0.4],
+            market="tw",
+            risk_free_rate=0.0,
+            use_market_cap_prior=False,
+        )
+        analysis_result = make_analysis_result(
+            tickers=["2330.TW", "2317.TW"],
+            market="tw",
+            alpha_status="unavailable",
+            alpha_message="Taiwan market factor attribution is not supported yet.",
+        )
+
+        with patch.object(
+            api.analysis_service,
+            "run_analysis",
+            new=AsyncMock(return_value=analysis_result),
+        ):
+            report = asyncio.run(api.generate_risk_report(payload))
+
+        notes_text = " ".join(note.detail for note in report.methodology_notes)
+        self.assertIn("TWD", notes_text)
+        self.assertIn("^TWII", notes_text)
+        self.assertIn("台湾市场因子归因", notes_text)
+        self.assertNotIn("Taiwan market factor attribution unavailable", notes_text)
+        self.assertEqual(report.portfolio_overview.currency, "TWD")
+        self.assertEqual(report.decision_summary.benchmark_symbol, "^TWII")
 
     def test_report_json_is_serializable(self) -> None:
         payload = api.RiskReportRequest(

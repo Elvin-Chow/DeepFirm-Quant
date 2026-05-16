@@ -89,6 +89,17 @@ class MLRiskEngineTests(unittest.TestCase):
         self.assertLessEqual(result.ml_var, 0.0)
         self.assertLessEqual(result.ml_es, result.ml_var)
 
+    def test_risk_score_uses_historical_tail_scale_before_saturating(self) -> None:
+        score, level = MLRiskEngine._risk_score(0.0604, reference_loss=0.0700)
+
+        self.assertEqual(score, 69)
+        self.assertEqual(level, "High")
+
+        score, level = MLRiskEngine._risk_score(0.0900, reference_loss=0.0700)
+
+        self.assertEqual(score, 100)
+        self.assertEqual(level, "Extreme")
+
     def test_insufficient_sample_uses_fallback_forecast(self) -> None:
         prices = self._prices_from_returns(self._market_returns(rows=20))
 

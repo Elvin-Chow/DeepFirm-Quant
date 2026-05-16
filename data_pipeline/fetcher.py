@@ -37,7 +37,14 @@ class FetchRequest(BaseModel):
     """Validated request for fetching financial data."""
 
     symbol: str = Field(..., min_length=1)
-    source: Literal["us_equity", "hk_equity", "china_macro", "china_equity"]
+    source: Literal[
+        "us_equity",
+        "hk_equity",
+        "jp_equity",
+        "tw_equity",
+        "china_macro",
+        "china_equity",
+    ]
     start_date: date
     end_date: date
 
@@ -222,6 +229,7 @@ class SmartFetcher:
         start_date: date,
         end_date: date,
         allow_partial: bool,
+        require_exact_end: bool = False,
     ) -> Optional[Tuple[pd.DataFrame, bool]]:
         """Return cached prices when they cover the requested window."""
         normalized = self._normalize_price_frame(df)
@@ -239,7 +247,7 @@ class SmartFetcher:
         expected_start, expected_end = self._expected_cache_bounds(start_date, end_date)
         first_date = pd.Timestamp(filtered["Date"].min())
         last_date = pd.Timestamp(filtered["Date"].max())
-        complete_tolerance = pd.Timedelta(days=3)
+        complete_tolerance = pd.Timedelta(days=0 if require_exact_end else 3)
         covers_start = first_date <= expected_start + complete_tolerance
         covers_end = last_date >= expected_end - complete_tolerance
         has_full_coverage = covers_start and covers_end
@@ -269,6 +277,7 @@ class SmartFetcher:
             self._price_cache_path(source, symbol),
             self._result_cache_path(source, symbol, start_date, end_date),
         ]
+        require_exact_end = source == "us_equity" and not allow_stale and not allow_partial
         for path in paths:
             if not os.path.exists(path):
                 continue
@@ -283,6 +292,7 @@ class SmartFetcher:
                     start_date,
                     end_date,
                     allow_partial=allow_partial,
+                    require_exact_end=require_exact_end,
                 )
                 if sliced is None:
                     continue
@@ -412,9 +422,16 @@ class SmartFetcher:
             return 1
 
     @staticmethod
-    def _market_for_ticker(ticker: str) -> Literal["us_equity", "hk_equity"]:
+    def _market_for_ticker(ticker: str) -> Literal["us_equity", "hk_equity", "jp_equity", "tw_equity"]:
         """Resolve the fetcher market source for a listed ticker."""
-        return "hk_equity" if ticker.upper().endswith(".HK") else "us_equity"
+        normalized = ticker.upper()
+        if normalized.endswith(".HK"):
+            return "hk_equity"
+        if normalized.endswith(".T"):
+            return "jp_equity"
+        if normalized.endswith(".TW") or normalized.endswith(".TWO"):
+            return "tw_equity"
+        return "us_equity"
 
     @staticmethod
     def _normalize_cn_yahoo_symbol(symbol: str) -> str:
@@ -436,7 +453,7 @@ class SmartFetcher:
 
     def _cache_response(
         self,
-        market: Literal["us_equity", "hk_equity"],
+        market: Literal["us_equity", "hk_equity", "jp_equity", "tw_equity"],
         symbol: str,
         start_date: date,
         end_date: date,
@@ -638,7 +655,7 @@ class SmartFetcher:
         symbol: str,
         start_date: date,
         end_date: date,
-        market: Literal["us_equity", "hk_equity"],
+        market: Literal["us_equity", "hk_equity", "jp_equity", "tw_equity"],
     ) -> FetchResponse:
         """Primary fetch via Yahoo Finance with process-wide rate limiting."""
         with self._yf_lock:
@@ -776,7 +793,7 @@ class SmartFetcher:
         symbol: str,
         start_date: date,
         end_date: date,
-        market: Literal["us_equity", "hk_equity"],
+        market: Literal["us_equity", "hk_equity", "jp_equity", "tw_equity"],
     ) -> FetchResponse:
         """Try cache -> yfinance -> Tiingo -> stale cache -> optional sandbox."""
         cached = self._cache_response(market, symbol, start_date, end_date)
@@ -871,6 +888,24 @@ class SmartFetcher:
     ) -> FetchResponse:
         """Fetch Hong Kong equity historical prices with failover."""
         return self._smart_fetch(symbol, start_date, end_date, "hk_equity")
+
+    def fetch_jp_equity(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+    ) -> FetchResponse:
+        """Fetch Japan equity historical prices with failover."""
+        return self._smart_fetch(symbol, start_date, end_date, "jp_equity")
+
+    def fetch_tw_equity(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+    ) -> FetchResponse:
+        """Fetch Taiwan equity historical prices with failover."""
+        return self._smart_fetch(symbol, start_date, end_date, "tw_equity")
 
     @staticmethod
     def _extract_yf_close_series(batch_df: pd.DataFrame, yf_symbol: str) -> Optional[pd.Series]:
@@ -1300,6 +1335,14 @@ class SmartFetcher:
             )
         if request.source == "hk_equity":
             return self.fetch_hk_equity(
+                request.symbol, request.start_date, request.end_date
+            )
+        if request.source == "jp_equity":
+            return self.fetch_jp_equity(
+                request.symbol, request.start_date, request.end_date
+            )
+        if request.source == "tw_equity":
+            return self.fetch_tw_equity(
                 request.symbol, request.start_date, request.end_date
             )
         if request.source == "china_equity":

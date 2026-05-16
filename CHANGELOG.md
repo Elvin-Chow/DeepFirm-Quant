@@ -4,6 +4,25 @@ All notable changes to the DeepFirm Quant project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+## [V4.1.0] - 2026-05-16
+
+### Backend
+- Added standalone Japan market mode with `.T` ticker validation, JPX calendar alignment, Yahoo Finance data access, Nikkei 225 OOS benchmark support, and a JPY RFR / TONA risk-free proxy.
+- Added standalone Taiwan market mode with `.TW` and `.TWO` ticker validation, XTAI calendar alignment, Yahoo Finance data access, TAIEX OOS benchmark support, and a Central Bank of the Republic of China discount-rate risk-free proxy.
+- Added Japan and Taiwan methodology output, benchmark provenance, local-currency handling, and alpha-attribution guardrails with explicit unavailable status.
+- Removed Mixed Market from backend API contracts, market snapshots, documentation, and crisis-warning training arguments while keeping standalone US, HK, China A-share, Japan, and Taiwan workflows supported.
+- Calibrated ML risk scores against portfolio-specific historical tail loss while preserving the absolute 6% floor.
+- Updated FastAPI metadata to version `4.1.0`.
+
+### Frontend
+- Added Japan and Taiwan market navigation, default portfolios, local JPY / TWD currency display, ticker validation copy, and localized Alpha unavailable messaging.
+- Extended the Welcome market snapshot dashboard to Japan and Taiwan, tracking Nikkei 225, TOPIX, JPX-Nikkei 400, TAIEX, FTSE TWSE Taiwan 50, and TWSE Electronics Index.
+- Added Japan and Taiwan report methodology notes so exported risk reports show benchmark, calendar, currency, and factor-attribution limitations clearly.
+- Removed Mixed Market from the frontend market selector and narrowed the Taiwan default portfolio to `2330.TW`, `2317.TW`, and `2454.TW`.
+- Updated frontend release notes and package metadata to version `4.1.0`.
+
 ## [V4.0.0] - 2026-05-15
 
 ### Backend

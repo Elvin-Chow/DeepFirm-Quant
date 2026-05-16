@@ -9,7 +9,8 @@ export const MARKET_OPTIONS = {
   "US Market": "us",
   "HK Market": "hk",
   "China A-Share Market": "cn",
-  "Mixed (US+HK)": "mixed",
+  "Japan Market": "jp",
+  "Taiwan Market": "tw",
 } as const;
 
 export type TimeOption = (typeof TIME_OPTIONS)[number];

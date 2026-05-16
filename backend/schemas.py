@@ -82,7 +82,7 @@ class PortfolioOptimizeRequest(WeightedMarketRequestBase):
     allocation_mode: AllocationMode = Field(default="professional")
     backtest_enabled: bool = Field(default=False, description="Enable out-of-sample backtest")
     test_ratio: float = Field(default=0.20, ge=0.10, le=0.30, description="Fraction of data to hold out for testing")
-    risk_free_rate: Optional[float] = Field(default=None, description="Annualized risk-free rate for Sharpe; if None, fetched dynamically from ^IRX")
+    risk_free_rate: Optional[float] = Field(default=None, description="Annualized risk-free rate for Sharpe; if None, resolved from the selected market proxy")
     use_market_cap_prior: bool = Field(default=True, description="Use market-cap implied equilibrium prior for Black-Litterman")
 
     @field_validator("risk_free_rate")

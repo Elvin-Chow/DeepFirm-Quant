@@ -1,10 +1,13 @@
 import type { MarketMode } from "@/types/api";
 
-export type CurrencySymbol = "$" | "HK$" | "¥";
+export type CurrencySymbol = "$" | "HK$" | "¥" | "NT$";
 
 export function getCurrencySymbol(market: MarketMode): CurrencySymbol {
-  if (market === "cn") {
+  if (market === "cn" || market === "jp") {
     return "¥";
+  }
+  if (market === "tw") {
+    return "NT$";
   }
   if (market === "hk") {
     return "HK$";

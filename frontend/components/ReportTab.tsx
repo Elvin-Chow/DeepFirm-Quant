@@ -421,7 +421,8 @@ function localizeMarket(value: string | undefined, lang: Lang): string {
     us: localText(lang, "US Market", "美国市场", "美國市場"),
     hk: localText(lang, "HK Market", "香港市场", "香港市場"),
     cn: localText(lang, "China A-Share Market", "中国 A 股市场", "中國 A 股市場"),
-    mixed: localText(lang, "Mixed Market", "混合市场", "混合市場"),
+    jp: localText(lang, "Japan Market", "日本市场", "日本市場"),
+    tw: localText(lang, "Taiwan Market", "台湾市场", "台灣市場"),
   };
   return labels[normalized] || (value ? value.toUpperCase() : "--");
 }

@@ -36,6 +36,52 @@ const changelogTypeOrder: Record<ChangelogEntry["items"][number]["type"], number
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "V4.1.0",
+    date: "2026-05-16",
+    items: [
+      {
+        type: "added",
+        text: {
+          en: "Standalone Japan and Taiwan market modes now support .T, .TW, and .TWO ticker validation, exchange-calendar alignment, local-currency analysis, and Yahoo Finance data access.",
+          zh: "新增独立日股与台股市场模式，支持 .T、.TW 与 .TWO 代码校验、交易所日历对齐、本币分析和 Yahoo Finance 数据抓取。",
+          tc: "新增獨立日股與台股市場模式，支援 .T、.TW 與 .TWO 代碼校驗、交易所日曆對齊、本幣分析和 Yahoo Finance 資料抓取。",
+        },
+      },
+      {
+        type: "added",
+        text: {
+          en: "Japan and Taiwan risk workflows now use Nikkei 225 and TAIEX OOS benchmarks, local risk-free proxy fallbacks, and clearer benchmark methodology provenance.",
+          zh: "日股与台股风险流程现在使用 Nikkei 225 与 TAIEX 样本外基准、本地无风险利率代理兜底，并返回更清晰的基准方法论来源。",
+          tc: "日股與台股風險流程現在使用 Nikkei 225 與 TAIEX 樣本外基準、本地無風險利率代理兜底，並返回更清晰的基準方法論來源。",
+        },
+      },
+      {
+        type: "added",
+        text: {
+          en: "The Welcome dashboard now tracks Nikkei 225, TOPIX, JPX-Nikkei 400, TAIEX, FTSE TWSE Taiwan 50, and TWSE Electronics Index for Japan and Taiwan views.",
+          zh: "欢迎页市场仪表盘现在为日股与台股视图跟踪 Nikkei 225、TOPIX、JPX-Nikkei 400、TAIEX、FTSE TWSE Taiwan 50 和 TWSE Electronics Index。",
+          tc: "歡迎頁市場儀表盤現在為日股與台股視圖追蹤 Nikkei 225、TOPIX、JPX-Nikkei 400、TAIEX、FTSE TWSE Taiwan 50 和 TWSE Electronics Index。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "Alpha attribution is hidden in Japan and Taiwan market mode, while backend guardrails return explicit unavailable status.",
+          zh: "日股与台股模式会隐藏 Alpha 归因模块；后端同步返回明确的暂不可用状态。",
+          tc: "日股與台股模式會隱藏 Alpha 歸因模組；後端同步返回明確的暫不可用狀態。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "Mixed Market was removed from market selection, and the Taiwan default portfolio now focuses on 2330.TW, 2317.TW, and 2454.TW.",
+          zh: "市场选择中移除混合市场；台股默认组合收敛为 2330.TW、2317.TW 与 2454.TW。",
+          tc: "市場選擇中移除混合市場；台股預設組合收斂為 2330.TW、2317.TW 與 2454.TW。",
+        },
+      },
+    ],
+  },
+  {
     version: "V4.0.0",
     date: "2026-05-15",
     items: [
@@ -699,6 +745,8 @@ const MARKET_PANEL_COPY = {
     latestQuoteLabel: "Latest Quote",
     backendRefreshed: "Refreshed",
     noActiveDataWarnings: "No active data warnings",
+    showMoreSources: "Show more",
+    hideSources: "Collapse",
   },
   zh: {
     marketStatus: "市场状态",
@@ -752,6 +800,8 @@ const MARKET_PANEL_COPY = {
     latestQuoteLabel: "最新行情",
     backendRefreshed: "后端刷新",
     noActiveDataWarnings: "无活跃数据提示",
+    showMoreSources: "展开更多",
+    hideSources: "收起来源",
   },
   tc: {
     marketStatus: "市場狀態",
@@ -805,6 +855,8 @@ const MARKET_PANEL_COPY = {
     latestQuoteLabel: "最新行情",
     backendRefreshed: "後端刷新",
     noActiveDataWarnings: "無活躍資料提示",
+    showMoreSources: "展開更多",
+    hideSources: "收起來源",
   },
 } as const;
 
@@ -812,7 +864,8 @@ const MARKET_LABELS: Record<MarketMode, Record<Lang, string>> = {
   us: { en: "US Market", zh: "美股市场", tc: "美股市場" },
   hk: { en: "HK Market", zh: "港股市场", tc: "港股市場" },
   cn: { en: "China A-Share Market", zh: "A 股市场", tc: "A 股市場" },
-  mixed: { en: "Mixed Market", zh: "混合市场", tc: "混合市場" },
+  jp: { en: "Japan Market", zh: "日本市场", tc: "日本市場" },
+  tw: { en: "Taiwan Market", zh: "台湾市场", tc: "台灣市場" },
 };
 
 type MarketPanelCopyKey = keyof typeof MARKET_PANEL_COPY.en;
@@ -878,6 +931,28 @@ function formatSourceLabel(value: string | null | undefined, lang: Lang): string
     return "Mixed providers";
   }
   return value;
+}
+
+function formatProviderAwareSourceLabel(value: string | null | undefined, lang: Lang, compactProvider: boolean): string {
+  const label = formatSourceLabel(value, lang);
+  if (label === "--") {
+    return label;
+  }
+
+  const providerMatch = label.match(/;\s*provider symbol\s+(.+)$/i);
+  const providerSymbol = providerMatch?.[1]?.trim();
+  if (!compactProvider || !providerSymbol) {
+    return label;
+  }
+
+  const baseLabel = providerMatch && typeof providerMatch.index === "number"
+    ? label.slice(0, providerMatch.index).trim()
+    : label;
+  const normalizedBase = ["Yahoo Finance chart metadata", "Yahoo Finance chart API", "cache (yahoo_chart)"].includes(baseLabel)
+    ? "Yahoo Finance"
+    : baseLabel;
+
+  return providerSymbol ? `${normalizedBase} · ${providerSymbol}` : normalizedBase;
 }
 
 function sessionLabel(status: MarketSessionStatus, lang: Lang): string {
@@ -1176,7 +1251,15 @@ function DashboardSparkline({
   );
 }
 
-function DashboardIndexCard({ index, lang }: { index: MarketSnapshotIndex; lang: Lang }) {
+function DashboardIndexCard({
+  index,
+  lang,
+  compactProviderSource = false,
+}: {
+  index: MarketSnapshotIndex;
+  lang: Lang;
+  compactProviderSource?: boolean;
+}) {
   const changePercent = typeof index.change_percent === "number" && Number.isFinite(index.change_percent)
     ? index.change_percent
     : null;
@@ -1186,7 +1269,8 @@ function DashboardIndexCard({ index, lang }: { index: MarketSnapshotIndex; lang:
   const series = trendPoints
     .map((point) => point.price)
     .filter((value) => typeof value === "number" && Number.isFinite(value));
-  const source = formatSourceLabel(index.source_detail || index.source, lang);
+  const sourceDetail = index.source_detail || index.source;
+  const source = formatProviderAwareSourceLabel(sourceDetail, lang, compactProviderSource);
 
   return (
     <article className="glass-card min-h-[232px] p-4">
@@ -1211,15 +1295,20 @@ function DashboardIndexCard({ index, lang }: { index: MarketSnapshotIndex; lang:
           </div>
         )}
       </div>
-      <div className="mt-3 flex items-center justify-between border-t border-df-border/60 pt-3 text-xs text-df-text-secondary">
-        <span>{index.asof_date || "--"}</span>
-        <span className="truncate text-right">{source}</span>
+      <div className="mt-3 flex items-center justify-between gap-3 border-t border-df-border/60 pt-3 text-xs text-df-text-secondary">
+        <span className="shrink-0 whitespace-nowrap font-mono">{index.asof_date || "--"}</span>
+        <span className="min-w-0 truncate text-right" title={sourceDetail}>
+          {source}
+        </span>
       </div>
     </article>
   );
 }
 
-function sourceDistribution(snapshot: MarketSnapshotResult | null): { label: string; pct: number; color: string }[] {
+function sourceDistribution(
+  snapshot: MarketSnapshotResult | null,
+  compactProvider: boolean = false,
+): { label: string; displayLabel: string; pct: number; color: string }[] {
   const colorScale = ["bg-blue-400", "bg-sky-400", "bg-amber-400", "bg-violet-400", "bg-rose-300"];
   const counts = new Map<string, number>();
   const indices = snapshot?.indices.filter((item) => item.status === "ok") ?? [];
@@ -1232,6 +1321,7 @@ function sourceDistribution(snapshot: MarketSnapshotResult | null): { label: str
     .sort((a, b) => b[1] - a[1])
     .map(([label, count], index) => ({
       label,
+      displayLabel: formatProviderAwareSourceLabel(label, "en", compactProvider),
       pct: Math.round((count / total) * 100),
       color: colorScale[index % colorScale.length],
     }));
@@ -1272,6 +1362,31 @@ function sourceHealthLabel(snapshot: MarketSnapshotResult | null, lang: Lang): {
     return { label: panelText(lang, "sourceWarnings"), className: "text-amber-300" };
   }
   return { label: panelText(lang, "sourceReady"), className: "text-blue-300" };
+}
+
+function SourceMetric({
+  label,
+  value,
+  valueClassName = "text-sm text-df-text",
+  title,
+}: {
+  label: string;
+  value: string | number;
+  valueClassName?: string;
+  title?: string;
+}) {
+  const displayValue = String(value);
+  return (
+    <div className="min-w-0 rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2">
+      <div className="truncate text-[11px] text-df-text-secondary">{label}</div>
+      <div
+        className={`mt-1 min-w-0 break-words font-mono font-semibold leading-tight tracking-normal ${valueClassName}`}
+        title={title ?? displayValue}
+      >
+        {displayValue}
+      </div>
+    </div>
+  );
 }
 
 function snapshotChangeSpread(snapshot: MarketSnapshotResult | null): number | null {
@@ -1365,6 +1480,7 @@ export default function WelcomeTab({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const snapshotRequestIdRef = useRef(0);
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [expandedVersions, setExpandedVersions] = useState<Set<string>>(
     () => new Set(CHANGELOG[0]?.version ? [CHANGELOG[0].version] : []),
   );
@@ -1440,6 +1556,10 @@ export default function WelcomeTab({
     });
   }, []);
 
+  const toggleSourcesExpanded = useCallback(() => {
+    setSourcesExpanded((current) => !current);
+  }, []);
+
   useEffect(() => {
     if (!snapshotsReady) {
       return undefined;
@@ -1448,6 +1568,7 @@ export default function WelcomeTab({
     const controller = new AbortController();
     setSnapshot(cachedSnapshotForMarket);
     setError(null);
+    setSourcesExpanded(false);
     if (shouldAutoRefresh) {
       void loadSnapshot(controller.signal, true, true).then((refreshed) => {
         if (!controller.signal.aborted && refreshed) {
@@ -1476,6 +1597,8 @@ export default function WelcomeTab({
   const summary = useMemo(() => summarizeIndices(snapshot), [snapshot]);
   const dashboardIndices = snapshot?.indices ?? [];
   const sourceRows = sourceDistribution(snapshot);
+  const visibleSourceRows = sourcesExpanded ? sourceRows : sourceRows.slice(0, 1);
+  const hiddenSourceCount = Math.max(sourceRows.length - 1, 0);
   const primarySourcePct = sourceRows[0]?.pct ?? 0;
   const primarySourceLabel = sourceRows[0]?.label ?? panelText(lang, "noActiveProvider");
   const sourceHealth = sourceHealthLabel(snapshot, lang);
@@ -1543,7 +1666,11 @@ export default function WelcomeTab({
           ? Array.from({ length: 3 }).map((_, index) => <LoadingIndexCard key={index} />)
           : dashboardIndices.length
             ? dashboardIndices.map((index) => (
-                <DashboardIndexCard key={index.symbol} index={index} lang={lang} />
+                <DashboardIndexCard
+                  key={index.symbol}
+                  index={index}
+                  lang={lang}
+                />
               ))
             : (
               <div className="glass-card p-4 text-sm text-df-text-secondary md:col-span-2 xl:col-span-5">
@@ -1576,7 +1703,7 @@ export default function WelcomeTab({
               );
             })}
           </div>
-          <div className="mt-2.5 rounded-md border border-amber-400/20 bg-[rgba(245,158,11,0.06)] px-2.5 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+          <div className="mt-2.5 flex flex-1 flex-col rounded-md border border-amber-400/20 bg-[rgba(245,158,11,0.06)] px-2.5 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
             <div className="mb-1.5 flex items-center gap-2">
               <Activity size={15} className="text-amber-400" />
               <span className="text-xs font-semibold text-df-text">{panelText(lang, "dailyBrief")}</span>
@@ -1600,52 +1727,56 @@ export default function WelcomeTab({
             <span className="shrink-0 text-xs text-df-text-secondary">{panelText(lang, "snapshotDerived")}</span>
           </div>
 
-          <div className="grid grid-cols-[116px_minmax(0,1fr)] items-center gap-4">
-            <BreadthDonut slices={breadthSlices} total={breadthTotal} noDataLabel={panelText(lang, "noBreadthData")} />
-            <div className="space-y-2">
-              {breadthSlices.map((slice) => (
-                <div key={slice.key} className="grid grid-cols-[auto_minmax(0,1fr)_2.75rem] items-center gap-2 text-xs">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: slice.color }} />
-                  <span className="truncate text-df-text-secondary">{slice.label}</span>
-                  <span className={`text-right font-mono font-semibold ${slice.textClass}`}>
-                    {slice.count}/{breadthTotal}
-                  </span>
+          <div className="flex flex-1 flex-col">
+            <div className="grid flex-1 grid-cols-[116px_minmax(0,1fr)] items-center gap-4">
+              <BreadthDonut slices={breadthSlices} total={breadthTotal} noDataLabel={panelText(lang, "noBreadthData")} />
+              <div className="space-y-2">
+                {breadthSlices.map((slice) => (
+                  <div key={slice.key} className="grid grid-cols-[auto_minmax(0,1fr)_2.75rem] items-center gap-2 text-xs">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: slice.color }} />
+                    <span className="truncate text-df-text-secondary">{slice.label}</span>
+                    <span className={`text-right font-mono font-semibold ${slice.textClass}`}>
+                      {slice.count}/{breadthTotal}
+                    </span>
+                  </div>
+                ))}
+                <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2 text-xs leading-5 text-df-text-secondary">
+                  {panelText(lang, "breadthBias")}: <span className={`font-semibold ${breadthBias.textClass}`}>{breadthBias.label}</span>
                 </div>
-              ))}
-              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2 text-xs leading-5 text-df-text-secondary">
-                {panelText(lang, "breadthBias")}: <span className={`font-semibold ${breadthBias.textClass}`}>{breadthBias.label}</span>
               </div>
             </div>
-          </div>
 
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2.5">
-              <div className="text-[11px] text-df-text-secondary">{panelText(lang, "breadth")}</div>
-              <div className="mt-1 font-mono text-lg font-semibold text-blue-300">{summary.up}</div>
-            </div>
-            <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2.5">
-              <div className="text-[11px] text-df-text-secondary">Avg</div>
-              <div className={`mt-1 font-mono text-lg font-semibold ${changeStyle(summary.average)}`}>
-                {formatPercent(summary.average)}
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2.5">
+                <div className="text-[11px] text-df-text-secondary">{panelText(lang, "breadth")}</div>
+                <div className="mt-1 font-mono text-lg font-semibold text-blue-300">{summary.up}</div>
               </div>
-            </div>
-            <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2.5">
-              <div className="text-[11px] text-df-text-secondary">Spread</div>
-              <div className="mt-1 font-mono text-lg font-semibold text-df-text">
-                {formatPercent(spread)}
+              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2.5">
+                <div className="text-[11px] text-df-text-secondary">Avg</div>
+                <div className={`mt-1 font-mono text-lg font-semibold ${changeStyle(summary.average)}`}>
+                  {formatPercent(summary.average)}
+                </div>
+              </div>
+              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2.5">
+                <div className="text-[11px] text-df-text-secondary">Spread</div>
+                <div className="mt-1 font-mono text-lg font-semibold text-df-text">
+                  {formatPercent(spread)}
+                </div>
               </div>
             </div>
           </div>
-          <div className="mt-auto pt-3">
+          <div className="mt-auto space-y-2 pt-3">
             <div className="grid grid-cols-2 gap-2 border-t border-df-border pt-3">
-              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2">
-                <div className="text-[11px] text-df-text-secondary">{panelText(lang, "trackedIndices")}</div>
-                <div className="mt-1 font-mono text-sm font-semibold text-df-text">{dashboardIndices.length}</div>
-              </div>
-              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2">
-                <div className="text-[11px] text-df-text-secondary">{panelText(lang, "refreshedAt")}</div>
-                <div className="mt-1 truncate font-mono text-xs font-semibold text-df-text-secondary">{compactUpdated}</div>
-              </div>
+              <SourceMetric
+                label={panelText(lang, "trackedIndices")}
+                value={dashboardIndices.length}
+              />
+              <SourceMetric
+                label={panelText(lang, "refreshedAt")}
+                value={compactUpdated}
+                valueClassName="text-xs text-df-text-secondary"
+                title={latestUpdated}
+              />
             </div>
           </div>
         </article>
@@ -1670,22 +1801,24 @@ export default function WelcomeTab({
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-3 py-2.5">
-                <div className="text-[11px] font-medium text-df-text-secondary">{panelText(lang, "sourceCoverage")}</div>
-                <div className="mt-1 font-mono text-lg font-semibold text-blue-300">{primarySourcePct}%</div>
-              </div>
-              <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-3 py-2.5">
-                <div className="text-[11px] font-medium text-df-text-secondary">{panelText(lang, "providerCount")}</div>
-                <div className="mt-1 font-mono text-lg font-semibold text-df-text">{sourceRows.length}</div>
-              </div>
+              <SourceMetric
+                label={panelText(lang, "sourceCoverage")}
+                value={`${primarySourcePct}%`}
+                valueClassName="text-lg text-blue-300"
+              />
+              <SourceMetric
+                label={panelText(lang, "providerCount")}
+                value={sourceRows.length}
+                valueClassName="text-lg text-df-text"
+              />
             </div>
 
             {sourceRows.length > 0 ? (
               <div className="space-y-1.5">
-                {sourceRows.slice(0, 3).map(({ label, pct, color }) => (
+                {visibleSourceRows.map(({ label, displayLabel, pct, color }) => (
                   <div key={label} className="grid grid-cols-[minmax(0,1fr)_2.5rem] items-center gap-2 text-xs">
                     <div className="min-w-0">
-                      <div className="mb-1 truncate text-df-text-secondary">{label}</div>
+                      <div className="mb-1 truncate text-df-text-secondary" title={label}>{displayLabel}</div>
                       <div className="h-1.5 overflow-hidden rounded-full bg-df-surface-solid/35">
                         <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
                       </div>
@@ -1693,6 +1826,24 @@ export default function WelcomeTab({
                     <span className="text-right font-mono text-df-text">{pct}%</span>
                   </div>
                 ))}
+                {hiddenSourceCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={toggleSourcesExpanded}
+                    className="flex h-7 w-full items-center justify-between rounded-md border border-df-border bg-df-surface-solid/18 px-2.5 text-left text-xs font-medium text-df-text-secondary transition-colors hover:bg-df-surface-solid/28"
+                    aria-expanded={sourcesExpanded}
+                  >
+                    <span>
+                      {sourcesExpanded
+                        ? panelText(lang, "hideSources")
+                        : `${panelText(lang, "showMoreSources")} (${hiddenSourceCount})`}
+                    </span>
+                    <ChevronDown
+                      size={14}
+                      className={`transition-transform ${sourcesExpanded ? "rotate-180" : "rotate-0"}`}
+                    />
+                  </button>
+                )}
               </div>
             ) : (
               <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-3 py-2.5 text-xs text-df-text-secondary">
@@ -1702,14 +1853,16 @@ export default function WelcomeTab({
 
             <div className="mt-auto space-y-2 border-t border-df-border pt-2.5">
               <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2">
-                  <div className="text-[11px] text-df-text-secondary">{panelText(lang, "trackedIndices")}</div>
-                  <div className="mt-1 font-mono text-sm font-semibold text-df-text">{dashboardIndices.length}</div>
-                </div>
-                <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2">
-                  <div className="text-[11px] text-df-text-secondary">{panelText(lang, "refreshedAt")}</div>
-                  <div className="mt-1 truncate font-mono text-xs font-semibold text-df-text-secondary">{compactUpdated}</div>
-                </div>
+                <SourceMetric
+                  label={panelText(lang, "trackedIndices")}
+                  value={dashboardIndices.length}
+                />
+                <SourceMetric
+                  label={panelText(lang, "refreshedAt")}
+                  value={compactUpdated}
+                  valueClassName="text-xs text-df-text-secondary"
+                  title={latestUpdated}
+                />
               </div>
               <div className="flex items-center gap-2 text-xs text-df-text-secondary">
                 {snapshot?.data_warnings?.length ? (

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
+from fastapi import HTTPException
 
 from backend import main as api
 from backend import market_snapshot
@@ -39,6 +40,12 @@ class FakeMarketSnapshotFetcher:
         self.last_source = "cache"
         self.last_source_detail = f"cache ({symbol})"
         return SimpleNamespace(data=frame)
+
+    def fetch_jp_equity(self, symbol, start_date, end_date):
+        return self.fetch_us_equity(symbol, start_date, end_date)
+
+    def fetch_tw_equity(self, symbol, start_date, end_date):
+        return self.fetch_us_equity(symbol, start_date, end_date)
 
 
 class MarketSnapshotTests(unittest.TestCase):
@@ -120,6 +127,33 @@ class MarketSnapshotTests(unittest.TestCase):
         self.assertEqual(hstech.source, "yahoo_chart")
         self.assertIn(":", hstech.asof_date or "")
 
+    def test_force_refresh_ignores_stale_chart_metadata_quote(self) -> None:
+        fetcher = FakeMarketSnapshotFetcher()
+
+        with patch.object(
+            market_snapshot,
+            "_fetch_yahoo_chart_meta",
+            return_value={
+                "regularMarketPrice": 1.0,
+                "regularMarketPreviousClose": 1.0,
+                "regularMarketTime": 1728676800,
+                "exchangeTimezoneName": "Asia/Hong_Kong",
+            },
+        ):
+            result = build_market_snapshot(
+                "hk",
+                fetcher,
+                now_utc=datetime(2026, 5, 12, 2, 0, tzinfo=timezone.utc),
+                force_refresh=True,
+            )
+
+        hstech = [index for index in result.indices if index.symbol == "HSTECH.HK"][0]
+        self.assertEqual(hstech.price, 103.0)
+        self.assertEqual(hstech.change, 3.0)
+        self.assertEqual(hstech.change_percent, 3.0)
+        self.assertEqual(hstech.source_detail, "cache (HSTECH.HK)")
+        self.assertTrue(any("ignored stale Yahoo Finance chart metadata" in warning for warning in result.data_warnings))
+
     def test_endpoint_returns_market_snapshot_contract(self) -> None:
         fetcher = FakeMarketSnapshotFetcher()
 
@@ -129,6 +163,56 @@ class MarketSnapshotTests(unittest.TestCase):
         self.assertEqual(result.market, "hk")
         self.assertEqual([index.symbol for index in result.indices], ["^HSI", "HSTECH.HK", "^HSCE"])
 
+    def test_endpoint_returns_jp_market_snapshot_contract(self) -> None:
+        fetcher = FakeMarketSnapshotFetcher()
+
+        with patch.object(api, "_make_fetcher", return_value=fetcher):
+            result = asyncio.run(api.get_market_snapshot("jp"))
+
+        self.assertEqual(result.market, "jp")
+        self.assertEqual([index.symbol for index in result.indices], ["^N225", "TOPIX", "JPX400"])
+
+    def test_endpoint_returns_tw_market_snapshot_contract(self) -> None:
+        fetcher = FakeMarketSnapshotFetcher()
+
+        with patch.object(api, "_make_fetcher", return_value=fetcher):
+            result = asyncio.run(api.get_market_snapshot("tw"))
+
+        self.assertEqual(result.market, "tw")
+        self.assertEqual([index.symbol for index in result.indices], ["^TWII", "^TSE50", "^TELI"])
+
+    def test_jp_snapshot_returns_three_market_indices(self) -> None:
+        fetcher = FakeMarketSnapshotFetcher()
+
+        result = build_market_snapshot(
+            "jp",
+            fetcher,
+            now_utc=datetime(2026, 5, 12, 3, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(fetcher.calls, ["^N225", "1306.T", "1592.T"])
+        self.assertEqual(result.market, "jp")
+        self.assertEqual(result.session_status, "lunch_break")
+        self.assertEqual([index.symbol for index in result.indices], ["^N225", "TOPIX", "JPX400"])
+        self.assertEqual([index.name for index in result.indices], ["Nikkei 225", "TOPIX", "JPX-Nikkei 400"])
+        self.assertIn("provider symbol 1306.T", result.indices[1].source_detail)
+        self.assertIn("provider symbol 1592.T", result.indices[2].source_detail)
+
+    def test_tw_snapshot_returns_three_market_indices(self) -> None:
+        fetcher = FakeMarketSnapshotFetcher()
+
+        result = build_market_snapshot(
+            "tw",
+            fetcher,
+            now_utc=datetime(2026, 5, 12, 2, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(fetcher.calls, ["^TWII", "^TSE50", "^TELI"])
+        self.assertEqual(result.market, "tw")
+        self.assertEqual(result.session_status, "open")
+        self.assertEqual([index.symbol for index in result.indices], ["^TWII", "^TSE50", "^TELI"])
+        self.assertEqual([index.name for index in result.indices], ["TAIEX", "FTSE TWSE Taiwan 50", "TWSE Electronics Index"])
+
     def test_endpoint_force_refresh_disables_fetcher_cache(self) -> None:
         fetcher = FakeMarketSnapshotFetcher()
 
@@ -137,6 +221,13 @@ class MarketSnapshotTests(unittest.TestCase):
 
         self.assertEqual(result.market, "hk")
         self.assertTrue(fetcher.cache_disabled)
+
+    def test_endpoint_rejects_mixed_market_snapshot(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(api.get_market_snapshot("mixed"))
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, "unsupported market: mixed")
 
 
 if __name__ == "__main__":

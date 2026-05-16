@@ -76,6 +76,118 @@ class FakeOOSFetcher:
 
 
 class ChinaAnalysisWorkflowTests(unittest.TestCase):
+    def test_jp_risk_comparison_uses_nikkei_and_tona_proxy(self) -> None:
+        service = PortfolioAnalysisService()
+        dates = pd.date_range("2026-01-05", periods=40, freq="B")
+        price_df = pd.DataFrame(
+            {"7203.T": 100.0 * np.exp(np.linspace(0.0, 0.08, len(dates)))},
+            index=dates,
+        )
+        benchmark_df = pd.DataFrame(
+            {
+                "Date": dates,
+                "Close": 100.0 * np.exp(np.linspace(0.0, 0.05, len(dates))),
+            }
+        )
+        request = api.RiskEvaluationRequest(
+            tickers=["7203.T"],
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 3, 31),
+            weights=[1.0],
+            market="jp",
+        )
+        result = RiskEvaluationResult(
+            tickers=["7203.T"],
+            historical_es=0.01,
+            monte_carlo_es=0.012,
+            confidence_level=0.99,
+            source="yahoo_chart",
+            source_detail="Yahoo Finance chart API",
+        )
+
+        class FakeBenchmarkFetcher:
+            last_source = "cache"
+            last_source_detail = "cache (test)"
+            data_warnings: list[str] = []
+
+        def fake_fetch_benchmark(fetcher, symbol, start_date, end_date, market):
+            self.assertEqual(symbol, "^N225")
+            self.assertEqual(market, "jp")
+            fetcher.last_source = "yahoo_chart"
+            fetcher.last_source_detail = "Yahoo Finance chart API"
+            return benchmark_df
+
+        with patch.object(service, "make_fetcher", return_value=FakeBenchmarkFetcher()):
+            with patch.object(service, "fetch_benchmark_prices", side_effect=fake_fetch_benchmark):
+                service.attach_risk_benchmark(result, request, price_df)
+
+        self.assertEqual(result.benchmark_symbol, "^N225")
+        self.assertEqual(result.benchmark_name, "Nikkei 225")
+        self.assertEqual(result.risk_free_symbol, "TONA")
+        self.assertEqual(result.risk_free_name, "JPY RFR")
+        self.assertEqual(result.risk_free_source, "fallback")
+        self.assertEqual(
+            result.risk_free_source_detail,
+            "Tokyo Overnight Average Rate proxy fallback (0.75% annualized)",
+        )
+        self.assertTrue(any("Japan risk-free rate" in warning for warning in result.data_warnings))
+
+    def test_tw_risk_comparison_uses_taiex_and_twd_policy_proxy(self) -> None:
+        service = PortfolioAnalysisService()
+        dates = pd.date_range("2026-01-05", periods=40, freq="B")
+        price_df = pd.DataFrame(
+            {"2330.TW": 100.0 * np.exp(np.linspace(0.0, 0.08, len(dates)))},
+            index=dates,
+        )
+        benchmark_df = pd.DataFrame(
+            {
+                "Date": dates,
+                "Close": 100.0 * np.exp(np.linspace(0.0, 0.05, len(dates))),
+            }
+        )
+        request = api.RiskEvaluationRequest(
+            tickers=["2330.TW"],
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 3, 31),
+            weights=[1.0],
+            market="tw",
+        )
+        result = RiskEvaluationResult(
+            tickers=["2330.TW"],
+            historical_es=0.01,
+            monte_carlo_es=0.012,
+            confidence_level=0.99,
+            source="yahoo_chart",
+            source_detail="Yahoo Finance chart API",
+        )
+
+        class FakeBenchmarkFetcher:
+            last_source = "cache"
+            last_source_detail = "cache (test)"
+            data_warnings: list[str] = []
+
+        def fake_fetch_benchmark(fetcher, symbol, start_date, end_date, market):
+            self.assertEqual(symbol, "^TWII")
+            self.assertEqual(market, "tw")
+            fetcher.last_source = "yahoo_chart"
+            fetcher.last_source_detail = "Yahoo Finance chart API"
+            return benchmark_df
+
+        with patch.object(service, "make_fetcher", return_value=FakeBenchmarkFetcher()):
+            with patch.object(service, "fetch_benchmark_prices", side_effect=fake_fetch_benchmark):
+                service.attach_risk_benchmark(result, request, price_df)
+
+        self.assertEqual(result.benchmark_symbol, "^TWII")
+        self.assertEqual(result.benchmark_name, "TAIEX")
+        self.assertEqual(result.risk_free_symbol, "CBC_DISCOUNT_RATE")
+        self.assertEqual(result.risk_free_name, "TWD policy rate")
+        self.assertEqual(result.risk_free_source, "fallback")
+        self.assertEqual(
+            result.risk_free_source_detail,
+            "Central Bank of the Republic of China discount rate fallback (2.00% annualized)",
+        )
+        self.assertTrue(any("Taiwan risk-free rate" in warning for warning in result.data_warnings))
+
     def test_cn_oos_uses_csi300_benchmark_and_inverse_vol_prior_warning(self) -> None:
         service = PortfolioAnalysisService()
         fetcher = FakeOOSFetcher()
@@ -92,7 +204,11 @@ class ChinaAnalysisWorkflowTests(unittest.TestCase):
             use_market_cap_prior=True,
         )
 
-        with patch("backend.services.ak.index_zh_a_hist", return_value=make_benchmark_frame()) as index_hist:
+        with patch.object(
+            service,
+            "fetch_cn_risk_free_rate",
+            side_effect=RuntimeError("risk-free unavailable"),
+        ), patch("backend.services.ak.index_zh_a_hist", return_value=make_benchmark_frame()) as index_hist:
             result = service.optimize_portfolio_from_prices(
                 payload,
                 fetcher,
@@ -110,7 +226,7 @@ class ChinaAnalysisWorkflowTests(unittest.TestCase):
         self.assertEqual(result.risk_free_rate_source, "fallback")
         self.assertEqual(
             result.risk_free_rate_source_detail,
-            "China A-share policy fallback (2.00% annualized)",
+            "ChinaBond 3-month government bond yield fallback (2.00% annualized)",
         )
         self.assertAlmostEqual(result.risk_free_rate, 0.02)
         self.assertTrue(
@@ -221,6 +337,114 @@ class ChinaAnalysisWorkflowTests(unittest.TestCase):
             "China A-share factor attribution is not supported yet.",
         )
         self.assertEqual(result.optimization.tickers, ["600519"])
+
+    def test_jp_full_analysis_marks_alpha_unavailable_without_factor_call(self) -> None:
+        dates = pd.date_range("2026-01-05", periods=90, freq="B")
+        price_df = pd.DataFrame(
+            {"7203.T": 100.0 * np.exp(np.linspace(0.0, 0.12, len(dates)))},
+            index=dates,
+        )
+        risk_result = RiskEvaluationResult(
+            tickers=["7203.T"],
+            historical_es=0.01,
+            monte_carlo_es=0.012,
+            confidence_level=0.99,
+            source="yahoo_chart",
+            source_detail="Yahoo Finance chart API",
+        )
+        optimization_result = OptimizationResult(
+            tickers=["7203.T"],
+            prior_returns=[0.1],
+            prior_weights=[1.0],
+            posterior_returns=[0.1],
+            posterior_weights=[1.0],
+            risk_aversion=2.5,
+        )
+        payload = api.AnalysisRunRequest(
+            tickers=["7203.T"],
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 6, 30),
+            weights=[1.0],
+            market="jp",
+            risk_free_rate=0.0,
+            use_market_cap_prior=False,
+        )
+
+        def fetch_prices_once(engine, tickers, start_date, end_date, market_mode):
+            engine.fetcher._mark_source("yahoo_chart", "Yahoo Finance chart API")
+            return price_df
+
+        with patch.object(api.RiskEngine, "_fetch_prices", autospec=True, side_effect=fetch_prices_once):
+            with patch.object(api.RiskEngine, "evaluate_from_prices", return_value=risk_result):
+                with patch.object(api.analysis_service, "run_alpha_from_prices") as run_alpha:
+                    with patch.object(api.RiskAnomalyDetector, "evaluate_from_prices", side_effect=ValueError("short sample")):
+                        with patch.object(api.MarketRegimeDetector, "evaluate_from_prices", side_effect=ValueError("short sample")):
+                            with patch.object(api.MLRiskEngine, "evaluate_from_prices", side_effect=ValueError("short sample")):
+                                with patch.object(api.analysis_service, "optimize_portfolio_from_prices", return_value=optimization_result):
+                                    result = asyncio.run(api.run_analysis(payload))
+
+        run_alpha.assert_not_called()
+        self.assertIsNone(result.alpha)
+        self.assertEqual(result.alpha_status, "unavailable")
+        self.assertEqual(
+            result.alpha_message,
+            "Japan market factor attribution is not supported yet.",
+        )
+        self.assertEqual(result.optimization.tickers, ["7203.T"])
+
+    def test_tw_full_analysis_marks_alpha_unavailable_without_factor_call(self) -> None:
+        dates = pd.date_range("2026-01-05", periods=90, freq="B")
+        price_df = pd.DataFrame(
+            {"2330.TW": 100.0 * np.exp(np.linspace(0.0, 0.12, len(dates)))},
+            index=dates,
+        )
+        risk_result = RiskEvaluationResult(
+            tickers=["2330.TW"],
+            historical_es=0.01,
+            monte_carlo_es=0.012,
+            confidence_level=0.99,
+            source="yahoo_chart",
+            source_detail="Yahoo Finance chart API",
+        )
+        optimization_result = OptimizationResult(
+            tickers=["2330.TW"],
+            prior_returns=[0.1],
+            prior_weights=[1.0],
+            posterior_returns=[0.1],
+            posterior_weights=[1.0],
+            risk_aversion=2.5,
+        )
+        payload = api.AnalysisRunRequest(
+            tickers=["2330.TW"],
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 6, 30),
+            weights=[1.0],
+            market="tw",
+            risk_free_rate=0.0,
+            use_market_cap_prior=False,
+        )
+
+        def fetch_prices_once(engine, tickers, start_date, end_date, market_mode):
+            engine.fetcher._mark_source("yahoo_chart", "Yahoo Finance chart API")
+            return price_df
+
+        with patch.object(api.RiskEngine, "_fetch_prices", autospec=True, side_effect=fetch_prices_once):
+            with patch.object(api.RiskEngine, "evaluate_from_prices", return_value=risk_result):
+                with patch.object(api.analysis_service, "run_alpha_from_prices") as run_alpha:
+                    with patch.object(api.RiskAnomalyDetector, "evaluate_from_prices", side_effect=ValueError("short sample")):
+                        with patch.object(api.MarketRegimeDetector, "evaluate_from_prices", side_effect=ValueError("short sample")):
+                            with patch.object(api.MLRiskEngine, "evaluate_from_prices", side_effect=ValueError("short sample")):
+                                with patch.object(api.analysis_service, "optimize_portfolio_from_prices", return_value=optimization_result):
+                                    result = asyncio.run(api.run_analysis(payload))
+
+        run_alpha.assert_not_called()
+        self.assertIsNone(result.alpha)
+        self.assertEqual(result.alpha_status, "unavailable")
+        self.assertEqual(
+            result.alpha_message,
+            "Taiwan market factor attribution is not supported yet.",
+        )
+        self.assertEqual(result.optimization.tickers, ["2330.TW"])
 
 
 if __name__ == "__main__":

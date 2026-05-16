@@ -9,7 +9,13 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sklearn.covariance import LedoitWolf
 
 from data_pipeline import AlignmentError, DataFetcherError, MarketAligner, SmartFetcher
-from models.market_validation import MarketMode, is_cn_ticker, is_hk_ticker
+from models.market_validation import (
+    MarketMode,
+    is_cn_ticker,
+    is_hk_ticker,
+    is_jp_ticker,
+    is_tw_ticker,
+)
 from models.request_validation import (
     normalize_tickers,
     validate_common_portfolio_contract,
@@ -526,13 +532,17 @@ class RiskEngine:
         return is_cn_ticker(str(ticker).strip())
 
     @staticmethod
-    def _resolve_market(ticker: str) -> Literal["NYSE", "HKEX", "SSE"]:
+    def _resolve_market(ticker: str) -> Literal["NYSE", "HKEX", "SSE", "JPX", "XTAI"]:
         """Map ticker symbols to their primary exchange."""
         clean_ticker = str(ticker).strip()
         if is_hk_ticker(clean_ticker):
             return "HKEX"
         if is_cn_ticker(clean_ticker):
             return "SSE"
+        if is_jp_ticker(clean_ticker):
+            return "JPX"
+        if is_tw_ticker(clean_ticker):
+            return "XTAI"
         return "NYSE"
 
     @staticmethod
@@ -711,6 +721,30 @@ class RiskEngine:
             aligned.columns = tickers
             return aligned
 
+        if market_mode == "jp":
+            non_jp_tickers = [
+                str(ticker).strip()
+                for ticker in tickers
+                if not is_jp_ticker(str(ticker).strip())
+            ]
+            if non_jp_tickers:
+                raise ValueError(
+                    "Japan market mode only accepts .T tickers: "
+                    + ", ".join(non_jp_tickers)
+                )
+
+        if market_mode == "tw":
+            non_tw_tickers = [
+                str(ticker).strip()
+                for ticker in tickers
+                if not is_tw_ticker(str(ticker).strip())
+            ]
+            if non_tw_tickers:
+                raise ValueError(
+                    "Taiwan market mode only accepts .TW or .TWO tickers: "
+                    + ", ".join(non_tw_tickers)
+                )
+
         # Try batch download first to minimize HTTP requests and avoid rate limits
         if len(tickers) > 1:
             try:
@@ -738,10 +772,6 @@ class RiskEngine:
                 if len(series_list) == len(tickers):
                     aligned = self.aligner.align_multiple(series_list, markets)
                     aligned.columns = tickers
-                    if market_mode == "mixed":
-                        for col in aligned.columns:
-                            if self._resolve_market(str(col)) == "HKEX":
-                                aligned[col] = aligned[col] / 7.8
                     return aligned
 
         # Fallback to per-ticker fetch; _fetch_yf enforces 2s rate limits
@@ -753,6 +783,10 @@ class RiskEngine:
             market = self._resolve_market(ticker)
             if market == "HKEX":
                 response = self.fetcher.fetch_hk_equity(ticker, start_date, end_date)
+            elif market == "JPX":
+                response = self.fetcher.fetch_jp_equity(ticker, start_date, end_date)
+            elif market == "XTAI":
+                response = self.fetcher.fetch_tw_equity(ticker, start_date, end_date)
             else:
                 response = self.fetcher.fetch_us_equity(ticker, start_date, end_date)
 
@@ -775,10 +809,6 @@ class RiskEngine:
 
         aligned = self.aligner.align_multiple(series_list, markets)
         aligned.columns = tickers
-        if market_mode == "mixed":
-            for col in aligned.columns:
-                if self._resolve_market(str(col)) == "HKEX":
-                    aligned[col] = aligned[col] / 7.8
         return aligned
 
     def evaluate(self, request: RiskEvaluationRequest) -> RiskEvaluationResult:

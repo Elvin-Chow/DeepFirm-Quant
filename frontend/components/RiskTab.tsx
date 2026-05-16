@@ -327,10 +327,10 @@ export default function RiskTab({ data, anomaly, regime, loading, lang, currency
   const latestReturnLabel = latestReturnPoint ? formatSignedPercent(latestReturnPoint.value, 1) : "";
   const benchmarkLabel = data.benchmark_symbol
     ? `${t(lang, "benchmark")} (${data.benchmark_symbol})`
-    : `${t(lang, "benchmark")} (SPY)`;
+    : t(lang, "benchmark");
   const riskFreeLabel = data.risk_free_symbol
     ? `Risk-free (${data.risk_free_symbol})`
-    : "Risk-free (^IRX)";
+    : "Risk-free";
   const chartValues = filteredChartData.flatMap((point) =>
     [point.portfolio, point.benchmark, point.riskFree].filter(
       (value): value is number => typeof value === "number" && Number.isFinite(value),

@@ -75,18 +75,47 @@ BENCHMARKS: dict[MarketMode, tuple[str, str]] = {
     "us": ("SPY", "SPDR S&P 500 ETF Trust"),
     "hk": ("^HSI", "Hang Seng Index"),
     "cn": ("000300", "CSI 300 Index"),
-    "mixed": ("ACWI", "iShares MSCI ACWI ETF"),
+    "jp": ("^N225", "Nikkei 225"),
+    "tw": ("^TWII", "TAIEX"),
 }
-RISK_BENCHMARK_SYMBOL = "SPY"
-RISK_BENCHMARK_NAME = "S&P 500"
 DEFAULT_RISK_FREE_RATE = 0.02
 RISK_FREE_TICKER = "^IRX"
 RISK_FREE_NAME = "Risk-free"
+DEFAULT_HK_RISK_FREE_RATE = 0.02
+HK_RISK_FREE_SYMBOL = "HKMA_EFB_91D"
+HK_RISK_FREE_NAME = "HKD 91D EFB"
+HK_RISK_FREE_SOURCE_DETAIL = "HKMA 91-day Exchange Fund Bills yield"
+HK_RISK_FREE_FALLBACK_DETAIL = "HKMA 91-day Exchange Fund Bills fallback (2.00% annualized)"
+HKMA_EFBN_YIELD_DAILY_URL = (
+    "https://api.hkma.gov.hk/public/market-data-and-statistics/"
+    "monthly-statistical-bulletin/efbn/efbn-yield-daily"
+)
+DEFAULT_CN_RISK_FREE_RATE = 0.02
+CN_RISK_FREE_SYMBOL = "CHINABOND_CGB_3M"
+CN_RISK_FREE_NAME = "CNY 3M CGB"
+CN_RISK_FREE_SOURCE_DETAIL = "ChinaBond 3-month government bond yield"
+CN_RISK_FREE_FALLBACK_DETAIL = "ChinaBond 3-month government bond yield fallback (2.00% annualized)"
+DEFAULT_JP_RISK_FREE_RATE = 0.0075
+JP_RISK_FREE_SYMBOL = "TONA"
+JP_RISK_FREE_NAME = "JPY RFR"
+JP_RISK_FREE_SOURCE_DETAIL = "Tokyo Overnight Average Rate proxy fallback (0.75% annualized)"
+DEFAULT_TW_RISK_FREE_RATE = 0.02
+TW_RISK_FREE_SYMBOL = "CBC_DISCOUNT_RATE"
+TW_RISK_FREE_NAME = "TWD policy rate"
+TW_RISK_FREE_SOURCE_DETAIL = "Central Bank of the Republic of China discount rate fallback (2.00% annualized)"
+RISK_FREE_PROXY_BY_MARKET: dict[MarketMode, tuple[str, str]] = {
+    "us": (RISK_FREE_TICKER, RISK_FREE_NAME),
+    "hk": (HK_RISK_FREE_SYMBOL, HK_RISK_FREE_NAME),
+    "cn": (CN_RISK_FREE_SYMBOL, CN_RISK_FREE_NAME),
+    "jp": (JP_RISK_FREE_SYMBOL, JP_RISK_FREE_NAME),
+    "tw": (TW_RISK_FREE_SYMBOL, TW_RISK_FREE_NAME),
+}
 REPORT_CURRENCY_BY_MARKET: dict[MarketMode, str] = {
     "us": "USD",
     "hk": "HKD",
     "cn": "CNY",
-    "mixed": "USD",
+    "jp": "JPY",
+    "tw": "TWD",
 }
 
 
@@ -246,6 +275,120 @@ class PortfolioAnalysisService:
             raise value
         raise RuntimeError(f"{provider_name} failed without an exception")
 
+    @staticmethod
+    def normalize_annualized_rate(value: object, symbol: str) -> float:
+        """Normalize a percent or decimal annualized rate into decimal form."""
+        rate = float(value)
+        if not np.isfinite(rate):
+            raise ValueError(f"non-finite risk-free rate for {symbol}")
+        if abs(rate) > 0.5:
+            rate = rate / 100.0
+        if rate <= -0.99:
+            raise ValueError(f"risk-free rate is too negative for {symbol}")
+        return rate
+
+    @staticmethod
+    def constant_risk_free_curve(
+        portfolio_index: pd.DatetimeIndex,
+        annualized_rate: float,
+    ) -> tuple[list[float], list[str]]:
+        """Build a daily cumulative risk-free curve aligned to portfolio dates."""
+        if len(portfolio_index) < 2:
+            return [], []
+        daily_rate = np.power(1.0 + annualized_rate, 1.0 / 252.0) - 1.0
+        daily_returns = np.full(len(portfolio_index) - 1, daily_rate, dtype=float)
+        cumulative = np.cumprod(1.0 + daily_returns) - 1.0
+        dates = portfolio_index[1:].strftime("%Y-%m-%d").tolist()
+        return cumulative.tolist(), dates
+
+    def fetch_hk_risk_free_rate(
+        self,
+        fetcher: SmartFetcher,
+        asof: Optional[date] = None,
+    ) -> float:
+        """Fetch the latest HKD 91-day Exchange Fund Bills yield from HKMA."""
+        end = asof if asof is not None else datetime.now().date()
+        start = end - timedelta(days=21)
+        session = getattr(fetcher, "_session", None)
+        if session is None:
+            raise DataFetcherError(
+                message="HKMA session is unavailable",
+                symbol=HK_RISK_FREE_SYMBOL,
+                source="hkma",
+            )
+
+        response = session.get(
+            HKMA_EFBN_YIELD_DAILY_URL,
+            params={
+                "from": start.isoformat(),
+                "to": end.isoformat(),
+                "pagesize": 100,
+                "sortby": "end_of_day",
+                "sortorder": "desc",
+            },
+            timeout=5,
+        )
+        status_code = int(getattr(response, "status_code", 0) or 0)
+        if status_code == 429:
+            raise DataFetcherError(
+                message="HKMA risk-free API rate limited with HTTP 429",
+                symbol=HK_RISK_FREE_SYMBOL,
+                source="hkma",
+            )
+        if status_code >= 400:
+            raise DataFetcherError(
+                message=f"HKMA risk-free API returned HTTP {status_code}",
+                symbol=HK_RISK_FREE_SYMBOL,
+                source="hkma",
+            )
+
+        payload = response.json()
+        records = payload.get("result", {}).get("records", [])
+        if not isinstance(records, list) or not records:
+            raise ValueError("HKMA risk-free response contains no records")
+
+        rows: list[tuple[pd.Timestamp, float]] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            record_date = pd.to_datetime(record.get("end_of_day"), errors="coerce")
+            rate = pd.to_numeric(pd.Series([record.get("efb_91d")]), errors="coerce").iloc[0]
+            if pd.isna(record_date) or pd.isna(rate):
+                continue
+            rows.append((record_date.normalize(), float(rate)))
+        if not rows:
+            raise ValueError("HKMA 91-day Exchange Fund Bills yield is empty")
+
+        latest_rate = sorted(rows, key=lambda item: item[0])[-1][1]
+        return self.normalize_annualized_rate(latest_rate, HK_RISK_FREE_SYMBOL)
+
+    def fetch_cn_risk_free_rate(self, asof: Optional[date] = None) -> float:
+        """Fetch the latest ChinaBond 3-month government bond yield."""
+        end = asof if asof is not None else datetime.now().date()
+        start = end - timedelta(days=21)
+        start_str = start.strftime("%Y%m%d")
+        end_str = end.strftime("%Y%m%d")
+        df = self.call_provider_with_timeout(
+            "akshare_cn_risk_free",
+            SmartFetcher._akshare_timeout_seconds(),
+            lambda: ak.bond_china_yield(start_date=start_str, end_date=end_str),
+        )
+        if df.empty or "3月" not in df.columns:
+            raise ValueError("ChinaBond 3-month government bond yield is empty")
+
+        normalized = df.copy()
+        date_col = "日期" if "日期" in normalized.columns else normalized.columns[0]
+        normalized[date_col] = pd.to_datetime(normalized[date_col], errors="coerce")
+        normalized["3月"] = pd.to_numeric(normalized["3月"], errors="coerce")
+        normalized = normalized.dropna(subset=[date_col, "3月"]).sort_values(date_col)
+        if asof is not None:
+            normalized = normalized[normalized[date_col] <= pd.Timestamp(asof)]
+        if normalized.empty:
+            raise ValueError("ChinaBond 3-month government bond yield has no valid observations")
+
+        latest_rate = float(normalized["3月"].iloc[-1])
+        return self.normalize_annualized_rate(latest_rate, CN_RISK_FREE_SYMBOL)
+
     def fetch_benchmark_prices(
         self,
         fetcher: SmartFetcher,
@@ -307,11 +450,30 @@ class PortfolioAnalysisService:
                 source="benchmark",
             )
 
-        bench_resp = fetcher.fetch_us_equity(
-            symbol,
-            start_date,
-            end_date,
-        )
+        if market == "hk":
+            bench_resp = fetcher.fetch_hk_equity(
+                symbol,
+                start_date,
+                end_date,
+            )
+        elif market == "jp":
+            bench_resp = fetcher.fetch_jp_equity(
+                symbol,
+                start_date,
+                end_date,
+            )
+        elif market == "tw":
+            bench_resp = fetcher.fetch_tw_equity(
+                symbol,
+                start_date,
+                end_date,
+            )
+        else:
+            bench_resp = fetcher.fetch_us_equity(
+                symbol,
+                start_date,
+                end_date,
+            )
         return self.normalize_benchmark_prices(bench_resp.data, symbol)
 
     def attach_risk_benchmark(
@@ -320,8 +482,8 @@ class PortfolioAnalysisService:
         request: RiskEvaluationRequest,
         price_df: pd.DataFrame,
     ) -> None:
-        """Attach a non-blocking S&P 500 comparison series to US risk results."""
-        if request.market != "us" or price_df.empty:
+        """Attach a non-blocking market benchmark comparison series to risk results."""
+        if price_df.empty:
             return
 
         portfolio_index = pd.DatetimeIndex(price_df.index)
@@ -332,14 +494,15 @@ class PortfolioAnalysisService:
             result.data_warnings.append("Risk comparison series unavailable: portfolio has fewer than two price observations")
             return
 
+        benchmark_symbol, benchmark_name = BENCHMARKS.get(request.market, BENCHMARKS["us"])
         benchmark_fetcher = self.make_fetcher(request.api_key, request.allow_sandbox_data)
         try:
             benchmark_df = self.fetch_benchmark_prices(
                 benchmark_fetcher,
-                RISK_BENCHMARK_SYMBOL,
+                benchmark_symbol,
                 request.start_date,
                 request.end_date,
-                "us",
+                request.market,
             )
             benchmark_dates = pd.to_datetime(benchmark_df["Date"], errors="coerce")
             benchmark_close = pd.to_numeric(benchmark_df["Close"], errors="coerce")
@@ -365,8 +528,8 @@ class PortfolioAnalysisService:
                 raise ValueError("benchmark return series is empty after alignment")
 
             cumulative = np.exp(np.cumsum(benchmark_returns.to_numpy(dtype=float))) - 1.0
-            result.benchmark_symbol = RISK_BENCHMARK_SYMBOL
-            result.benchmark_name = RISK_BENCHMARK_NAME
+            result.benchmark_symbol = benchmark_symbol
+            result.benchmark_name = benchmark_name
             result.benchmark_cumulative_returns = cumulative.tolist()
             result.benchmark_performance_dates = benchmark_returns.index.strftime("%Y-%m-%d").tolist()
             result.benchmark_source = benchmark_fetcher.last_source
@@ -378,11 +541,37 @@ class PortfolioAnalysisService:
                     warnings.append(warning)
             result.data_warnings = warnings
         except (DataFetcherError, ValueError, KeyError, TypeError) as exc:
-            warning = f"{RISK_BENCHMARK_NAME} benchmark unavailable: {exc}"
+            warning = f"{benchmark_name} benchmark unavailable: {exc}"
             if warning not in result.data_warnings:
                 result.data_warnings.append(warning)
 
         risk_free_fetcher = self.make_fetcher(request.api_key, request.allow_sandbox_data)
+        if request.market != "us":
+            risk_free_rate, risk_free_source, risk_free_detail, risk_free_warnings = self.resolve_risk_free_rate(
+                risk_free_fetcher,
+                None,
+                asof=request.end_date,
+                market=request.market,
+            )
+            cumulative, dates = self.constant_risk_free_curve(portfolio_index, risk_free_rate)
+            if dates:
+                risk_free_symbol, risk_free_name = RISK_FREE_PROXY_BY_MARKET.get(
+                    request.market,
+                    (RISK_FREE_TICKER, RISK_FREE_NAME),
+                )
+                result.risk_free_symbol = risk_free_symbol
+                result.risk_free_name = risk_free_name
+                result.risk_free_cumulative_returns = cumulative
+                result.risk_free_performance_dates = dates
+                result.risk_free_source = risk_free_source
+                result.risk_free_source_detail = risk_free_detail
+            warnings = list(result.data_warnings or [])
+            for warning in risk_free_warnings:
+                if warning not in warnings:
+                    warnings.append(warning)
+            result.data_warnings = warnings
+            return
+
         try:
             risk_free_response = risk_free_fetcher.fetch_us_equity(
                 RISK_FREE_TICKER,
@@ -423,7 +612,15 @@ class PortfolioAnalysisService:
                     warnings.append(warning)
             result.data_warnings = warnings
         except (DataFetcherError, ValueError, KeyError, TypeError) as exc:
-            warning = f"{RISK_FREE_NAME} proxy unavailable: {exc}"
+            cumulative, dates = self.constant_risk_free_curve(portfolio_index, DEFAULT_RISK_FREE_RATE)
+            if dates:
+                result.risk_free_symbol = RISK_FREE_TICKER
+                result.risk_free_name = RISK_FREE_NAME
+                result.risk_free_cumulative_returns = cumulative
+                result.risk_free_performance_dates = dates
+                result.risk_free_source = "fallback"
+                result.risk_free_source_detail = "Deterministic fallback (2.00% annualized)"
+            warning = f"{RISK_FREE_NAME} proxy unavailable: {exc}; defaulted to 2.00% annualized."
             if warning not in result.data_warnings:
                 result.data_warnings.append(warning)
 
@@ -432,10 +629,45 @@ class PortfolioAnalysisService:
         fetcher: SmartFetcher,
         requested_rate: Optional[float],
         asof: Optional[date] = None,
+        market: MarketMode = "us",
     ) -> tuple[float, str, str, list[str]]:
         """Return the risk-free rate, source label, and non-fatal warnings."""
         if requested_rate is not None:
             return float(requested_rate), "request", "Request override", []
+        if market == "hk":
+            try:
+                return self.fetch_hk_risk_free_rate(fetcher, asof=asof), "hkma", HK_RISK_FREE_SOURCE_DETAIL, []
+            except Exception as exc:
+                return (
+                    DEFAULT_HK_RISK_FREE_RATE,
+                    "fallback",
+                    HK_RISK_FREE_FALLBACK_DETAIL,
+                    [f"Hong Kong risk-free rate was unavailable ({exc}); defaulted to 2.00% annualized."],
+                )
+        if market == "cn":
+            try:
+                return self.fetch_cn_risk_free_rate(asof=asof), "chinabond", CN_RISK_FREE_SOURCE_DETAIL, []
+            except Exception as exc:
+                return (
+                    DEFAULT_CN_RISK_FREE_RATE,
+                    "fallback",
+                    CN_RISK_FREE_FALLBACK_DETAIL,
+                    [f"China A-share risk-free rate was unavailable ({exc}); defaulted to 2.00% annualized."],
+                )
+        if market == "jp":
+            return (
+                DEFAULT_JP_RISK_FREE_RATE,
+                "fallback",
+                JP_RISK_FREE_SOURCE_DETAIL,
+                ["Japan risk-free rate live source is unavailable; defaulted to 0.75% annualized."],
+            )
+        if market == "tw":
+            return (
+                DEFAULT_TW_RISK_FREE_RATE,
+                "fallback",
+                TW_RISK_FREE_SOURCE_DETAIL,
+                ["Taiwan risk-free rate live source is unavailable; defaulted to 2.00% annualized."],
+            )
         try:
             end = asof if asof is not None else datetime.now().date()
             start = end - timedelta(days=7)
@@ -654,11 +886,17 @@ class PortfolioAnalysisService:
             return result
 
         def build_alpha() -> Optional[FactorRegressionResult]:
-            if payload.market == "cn":
+            if payload.market in {"cn", "jp", "tw"}:
+                alpha_messages = {
+                    "cn": "China A-share factor attribution is not supported yet.",
+                    "jp": "Japan market factor attribution is not supported yet.",
+                    "tw": "Taiwan market factor attribution is not supported yet.",
+                }
+                alpha_message = alpha_messages[payload.market]
                 alpha_meta.update(
                     {
                         "status": "unavailable",
-                        "message": "China A-share factor attribution is not supported yet.",
+                        "message": alpha_message,
                         "factor_available_through": None,
                         "effective_start": None,
                         "effective_end": None,
@@ -919,7 +1157,8 @@ class PortfolioAnalysisService:
             "us": cls._localized_text(language, "US market", "美国市场", "美國市場"),
             "hk": cls._localized_text(language, "HK market", "香港市场", "香港市場"),
             "cn": cls._localized_text(language, "China A-share market", "中国 A 股市场", "中國 A 股市場"),
-            "mixed": cls._localized_text(language, "Mixed US/HK market", "美港混合市场", "美港混合市場"),
+            "jp": cls._localized_text(language, "Japan market", "日本市场", "日本市場"),
+            "tw": cls._localized_text(language, "Taiwan market", "台湾市场", "台灣市場"),
         }
         return labels.get(normalized, value.upper() if value else cls._localized_na(language))
 
@@ -1092,6 +1331,18 @@ class PortfolioAnalysisService:
                 "China A-share factor attribution is not supported yet.",
                 "中国 A 股因子归因暂未接入。",
                 "中國 A 股因子歸因暫未接入。",
+            ),
+            "Japan market factor attribution is not supported yet.": cls._localized_text(
+                language,
+                "Japan market factor attribution is not supported yet.",
+                "日本市场因子归因暂未接入。",
+                "日本市場因子歸因暫未接入。",
+            ),
+            "Taiwan market factor attribution is not supported yet.": cls._localized_text(
+                language,
+                "Taiwan market factor attribution is not supported yet.",
+                "台湾市场因子归因暂未接入。",
+                "台灣市場因子歸因暫未接入。",
             ),
             "Alpha attribution is unavailable for this report.": cls._localized_text(
                 language,
@@ -1550,6 +1801,90 @@ class PortfolioAnalysisService:
                 ]
             )
 
+        if payload.market == "jp":
+            notes.extend(
+                [
+                    RiskReportMethodologyNote(
+                        code="JP_CURRENCY_BASIS",
+                        title=cls._localized_text(language, "JPY basis", "日元计价口径", "日圓計價口徑"),
+                        detail=cls._localized_text(
+                            language,
+                            "JP market report uses JPY valuation basis.",
+                            "日本市场报告采用日元（JPY）口径。",
+                            "日本市場報告採用日圓（JPY）口徑。",
+                        ),
+                    ),
+                    RiskReportMethodologyNote(
+                        code="JP_BENCHMARK",
+                        title=cls._localized_text(language, "Nikkei 225 benchmark", "日经 225 基准", "日經 225 基準"),
+                        detail=cls._localized_text(
+                            language,
+                            "JP out-of-sample benchmark uses Nikkei 225 (^N225).",
+                            "日本市场样本外评估基准使用日经 225（^N225）。",
+                            "日本市場樣本外評估基準使用日經 225（^N225）。",
+                        ),
+                    ),
+                    RiskReportMethodologyNote(
+                        code="JP_FACTOR_ATTRIBUTION_UNAVAILABLE",
+                        title=cls._localized_text(
+                            language,
+                            "Japan market factor attribution unavailable",
+                            "日本市场因子归因不可用",
+                            "日本市場因子歸因不可用",
+                        ),
+                        detail=cls._localized_text(
+                            language,
+                            "Japan market factor attribution unavailable.",
+                            "当前尚未接入日本市场因子归因，报告不会使用日股 Alpha 归因结论。",
+                            "目前尚未接入日本市場因子歸因，報告不會使用日股 Alpha 歸因結論。",
+                        ),
+                        severity="limitation",
+                    ),
+                ]
+            )
+
+        if payload.market == "tw":
+            notes.extend(
+                [
+                    RiskReportMethodologyNote(
+                        code="TW_CURRENCY_BASIS",
+                        title=cls._localized_text(language, "TWD basis", "新台币计价口径", "新台幣計價口徑"),
+                        detail=cls._localized_text(
+                            language,
+                            "TW market report uses TWD valuation basis.",
+                            "台湾市场报告采用新台币（TWD）口径。",
+                            "台灣市場報告採用新台幣（TWD）口徑。",
+                        ),
+                    ),
+                    RiskReportMethodologyNote(
+                        code="TW_BENCHMARK",
+                        title=cls._localized_text(language, "TAIEX benchmark", "台湾加权指数基准", "台灣加權指數基準"),
+                        detail=cls._localized_text(
+                            language,
+                            "TW out-of-sample benchmark uses TAIEX (^TWII).",
+                            "台湾市场样本外评估基准使用台湾加权指数（TAIEX，^TWII）。",
+                            "台灣市場樣本外評估基準使用台灣加權指數（TAIEX，^TWII）。",
+                        ),
+                    ),
+                    RiskReportMethodologyNote(
+                        code="TW_FACTOR_ATTRIBUTION_UNAVAILABLE",
+                        title=cls._localized_text(
+                            language,
+                            "Taiwan market factor attribution unavailable",
+                            "台湾市场因子归因不可用",
+                            "台灣市場因子歸因不可用",
+                        ),
+                        detail=cls._localized_text(
+                            language,
+                            "Taiwan market factor attribution unavailable.",
+                            "当前尚未接入台湾市场因子归因，报告不会使用台股 Alpha 归因结论。",
+                            "目前尚未接入台灣市場因子歸因，報告不會使用台股 Alpha 歸因結論。",
+                        ),
+                        severity="limitation",
+                    ),
+                ]
+            )
+
         warning_text = " ".join(data_warnings)
         if "inverse-volatility" in warning_text:
             notes.append(
@@ -1918,25 +2253,20 @@ class PortfolioAnalysisService:
         risk_free_rate_source_detail = ""
         methodology_warnings: list[str] = []
         if payload.backtest_enabled:
+            (
+                risk_free_rate,
+                risk_free_rate_source,
+                risk_free_rate_source_detail,
+                risk_free_warnings,
+            ) = self.resolve_risk_free_rate(
+                fetcher,
+                payload.risk_free_rate,
+                asof=asof,
+                market=payload.market,
+            )
             if payload.market == "cn" and payload.risk_free_rate is None:
-                risk_free_rate = DEFAULT_RISK_FREE_RATE
-                risk_free_rate_source = "fallback"
-                risk_free_rate_source_detail = "China A-share policy fallback (2.00% annualized)"
-                risk_free_warnings = [
-                    "China A-share risk-free rate is unavailable; defaulted to 2.00% annualized.",
-                    "China A-share OOS benchmark uses CSI 300 Index (000300).",
-                ]
-            else:
-                (
-                    risk_free_rate,
-                    risk_free_rate_source,
-                    risk_free_rate_source_detail,
-                    risk_free_warnings,
-                ) = self.resolve_risk_free_rate(
-                    fetcher,
-                    payload.risk_free_rate,
-                    asof=asof,
-                )
+                risk_free_warnings = list(risk_free_warnings)
+                risk_free_warnings.append("China A-share OOS benchmark uses CSI 300 Index (000300).")
             methodology_warnings.extend(risk_free_warnings)
 
         regularization_boost = 1.0

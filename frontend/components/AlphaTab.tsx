@@ -60,15 +60,21 @@ export default function AlphaTab({
 
   if (loading) return <Loading />;
   if (!data) {
-    const unavailableMessage =
-      market === "cn" && status === "unavailable"
-        ? t(lang, "chinaAlphaUnavailable")
-        : message || t(lang, "alphaUnavailableMessage");
+    let unavailableMessage = message || t(lang, "alphaUnavailableMessage");
+    if (market === "cn" && status === "unavailable") {
+      unavailableMessage = t(lang, "chinaAlphaUnavailable");
+    }
+    if (market === "jp" && status === "unavailable") {
+      unavailableMessage = t(lang, "japanAlphaUnavailable");
+    }
+    if (market === "tw" && status === "unavailable") {
+      unavailableMessage = t(lang, "taiwanAlphaUnavailable");
+    }
     const hasUnavailableDetail = Boolean(message || factorAvailableThrough);
     return (
       <EmptyState
         text={
-          hasUnavailableDetail || market === "cn"
+          hasUnavailableDetail || market === "cn" || market === "jp" || market === "tw"
             ? unavailableMessage
             : t(lang, "emptyAlpha")
         }
@@ -149,7 +155,7 @@ export default function AlphaTab({
         </div>
       )}
 
-      {market !== "us" && market !== "cn" && (
+      {market !== "us" && market !== "cn" && market !== "jp" && market !== "tw" && (
         <div className="rounded-lg border border-sky-400/30 bg-sky-400/10 px-3 py-3 text-sm text-sky-700 dark:text-sky-200 sm:px-4">
           <div className="flex items-start gap-3">
             <AlertTriangle size={18} className="mt-0.5 shrink-0" />

@@ -76,6 +76,18 @@ DOMAIN_PRESETS: dict[str, list[TrainingPortfolio]] = {
             tickers=["600519", "300750", "000001", "601988"],
             weights=[],
         ),
+        TrainingPortfolio(
+            name="jp_large_cap",
+            market="jp",
+            tickers=["7203.T", "6758.T", "9984.T"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="tw_large_cap",
+            market="tw",
+            tickers=["2330.TW", "2317.TW", "2454.TW"],
+            weights=[],
+        ),
     ],
 }
 
@@ -242,7 +254,7 @@ def build_domain_training_frame(
 
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train crisis warning XGBoost artifacts.")
-    parser.add_argument("--market", choices=["us", "hk", "cn", "mixed"], default="us")
+    parser.add_argument("--market", choices=["us", "hk", "cn", "jp", "tw"], default="us")
     parser.add_argument("--tickers", default="")
     parser.add_argument("--weights", default="")
     parser.add_argument("--domain-preset", choices=["single", *DOMAIN_PRESETS.keys()], default="single")

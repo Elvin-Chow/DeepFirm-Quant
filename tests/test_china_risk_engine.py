@@ -186,6 +186,144 @@ class ChinaRiskEngineFetchTests(unittest.TestCase):
         self.assertIn("unchanged for", warning_text)
 
 
+class FakeJapanFetcher:
+    def __init__(self) -> None:
+        self.last_source = "unknown"
+        self.last_source_detail = "unknown"
+        self.data_warnings: list[str] = []
+        self.jp_calls: list[str] = []
+        self.batch_called = False
+
+    def fetch_equity_batch(self, tickers, start_date, end_date):
+        self.batch_called = True
+        raise DataFetcherError(
+            message="batch unavailable",
+            symbol=",".join(tickers),
+            source="yfinance",
+        )
+
+    def fetch_jp_equity(self, symbol, start_date, end_date):
+        self.jp_calls.append(symbol)
+        self.last_source = "yahoo_chart"
+        self.last_source_detail = "Yahoo Finance chart API"
+        dates = pd.date_range("2026-01-05", periods=90, freq="B")
+        return SimpleNamespace(
+            data=pd.DataFrame(
+                {
+                    "Date": dates,
+                    "Close": 100.0 * np.exp(np.linspace(0.0, 0.10, len(dates))),
+                }
+            )
+        )
+
+
+class FakeTaiwanFetcher:
+    def __init__(self) -> None:
+        self.last_source = "unknown"
+        self.last_source_detail = "unknown"
+        self.data_warnings: list[str] = []
+        self.tw_calls: list[str] = []
+        self.batch_called = False
+
+    def fetch_equity_batch(self, tickers, start_date, end_date):
+        self.batch_called = True
+        raise DataFetcherError(
+            message="batch unavailable",
+            symbol=",".join(tickers),
+            source="yfinance",
+        )
+
+    def fetch_tw_equity(self, symbol, start_date, end_date):
+        self.tw_calls.append(symbol)
+        self.last_source = "yahoo_chart"
+        self.last_source_detail = "Yahoo Finance chart API"
+        dates = pd.date_range("2026-01-05", periods=90, freq="B")
+        return SimpleNamespace(
+            data=pd.DataFrame(
+                {
+                    "Date": dates,
+                    "Close": 100.0 * np.exp(np.linspace(0.0, 0.10, len(dates))),
+                }
+            )
+        )
+
+
+class JapanRiskEngineFetchTests(unittest.TestCase):
+    def test_jp_fetch_flow_uses_jpx_alignment(self) -> None:
+        fetcher = FakeJapanFetcher()
+        aligner = FakeAligner()
+        engine = RiskEngine(fetcher=fetcher, aligner=aligner)
+
+        prices = engine._fetch_prices(
+            ["7203.T"],
+            date(2026, 1, 1),
+            date(2026, 6, 30),
+            market_mode="jp",
+        )
+
+        self.assertFalse(fetcher.batch_called)
+        self.assertEqual(fetcher.jp_calls, ["7203.T"])
+        self.assertEqual(aligner.markets, ["JPX"])
+        self.assertEqual(list(prices.columns), ["7203.T"])
+
+    def test_single_jp_equity_can_compute_risk_result(self) -> None:
+        fetcher = FakeJapanFetcher()
+        engine = RiskEngine(fetcher=fetcher, aligner=FakeAligner())
+        request = RiskEvaluationRequest(
+            tickers=["7203.T"],
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 6, 30),
+            market="jp",
+            mc_paths=1_000,
+        )
+
+        result = engine.evaluate(request)
+
+        self.assertEqual(result.tickers, ["7203.T"])
+        self.assertTrue(np.isfinite(result.historical_es))
+        self.assertTrue(np.isfinite(result.monte_carlo_es))
+        self.assertEqual(result.source, "yahoo_chart")
+        self.assertEqual(result.source_detail, "Yahoo Finance chart API")
+
+
+class TaiwanRiskEngineFetchTests(unittest.TestCase):
+    def test_tw_fetch_flow_uses_xtai_alignment(self) -> None:
+        fetcher = FakeTaiwanFetcher()
+        aligner = FakeAligner()
+        engine = RiskEngine(fetcher=fetcher, aligner=aligner)
+
+        prices = engine._fetch_prices(
+            ["2330.TW"],
+            date(2026, 1, 1),
+            date(2026, 6, 30),
+            market_mode="tw",
+        )
+
+        self.assertFalse(fetcher.batch_called)
+        self.assertEqual(fetcher.tw_calls, ["2330.TW"])
+        self.assertEqual(aligner.markets, ["XTAI"])
+        self.assertEqual(list(prices.columns), ["2330.TW"])
+
+    def test_single_tw_equity_can_compute_risk_result(self) -> None:
+        fetcher = FakeTaiwanFetcher()
+        engine = RiskEngine(fetcher=fetcher, aligner=FakeAligner())
+        request = RiskEvaluationRequest(
+            tickers=["2330.TW"],
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 6, 30),
+            market="tw",
+            mc_paths=1_000,
+        )
+
+        result = engine.evaluate(request)
+
+        self.assertEqual(result.tickers, ["2330.TW"])
+        self.assertTrue(np.isfinite(result.historical_es))
+        self.assertTrue(np.isfinite(result.monte_carlo_es))
+        self.assertEqual(result.source, "yahoo_chart")
+        self.assertEqual(result.source_detail, "Yahoo Finance chart API")
+
+
 class ChinaFetcherFallbackTests(unittest.TestCase):
     def setUp(self) -> None:
         SmartFetcher._china_akshare_cooldown_until = 0.0

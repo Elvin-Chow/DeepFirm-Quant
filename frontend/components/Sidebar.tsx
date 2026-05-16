@@ -34,6 +34,7 @@ import React, { useEffect, useState } from "react";
 interface SidebarProps {
   tickers: string;
   setTickers: (v: string) => void;
+  tickerPlaceholder: string;
   timeWindow: string;
   setTimeWindow: (v: string) => void;
   weights: number[];
@@ -160,6 +161,7 @@ export default function Sidebar(props: SidebarProps) {
   const {
     tickers,
     setTickers,
+    tickerPlaceholder,
     timeWindow,
     setTimeWindow,
     weights,
@@ -441,7 +443,7 @@ export default function Sidebar(props: SidebarProps) {
             className="min-h-11 w-full df-control rounded-2xl px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-df-accent/50"
             value={tickers}
             onChange={(e) => setTickers(e.target.value)}
-            placeholder="AAPL, MSFT"
+            placeholder={tickerPlaceholder}
           />
         </AccordionSection>
 

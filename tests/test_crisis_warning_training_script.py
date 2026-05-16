@@ -44,6 +44,7 @@ class CrisisWarningTrainingScriptTests(unittest.TestCase):
         self.assertIn("us", markets)
         self.assertIn("hk", markets)
         self.assertIn("cn", markets)
+        self.assertIn("jp", markets)
 
     def test_domain_training_frame_combines_portfolio_rows(self) -> None:
         frame_a = self._label_frame(80, 6)

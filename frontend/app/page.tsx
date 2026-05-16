@@ -54,6 +54,23 @@ type MLForecastHorizon = NonNullable<AnalysisRunRequest["ml_horizon"]>;
 type AllocationMode = NonNullable<PortfolioOptimizeRequest["allocation_mode"]>;
 type MarketFlag = { src: string; alt: string; objectPosition?: string };
 type BackendHealth = "checking" | "online" | "offline";
+type AnalysisViewState = {
+  riskData: RiskEvaluationResult | null;
+  anomalyData: RiskAnomalyResult | null;
+  regimeData: RiskRegimeResult | null;
+  mlForecastData: RiskMLForecastResult | null;
+  crisisWarningData: CrisisWarningResult | null;
+  alphaData: FactorRegressionResult | null;
+  alphaStatus: AnalysisRunResult["alpha_status"];
+  alphaMessage: string;
+  factorAvailableThrough: string | null;
+  alphaEffectiveStart: string | null;
+  alphaEffectiveEnd: string | null;
+  optData: OptimizationResult | null;
+  reportData: RiskReportResult | null;
+  reportError: string | null;
+  analysisCompleted: boolean;
+};
 
 const BACKEND_HEALTH_INTERVAL_MS = 5_000;
 
@@ -82,31 +99,65 @@ const BACKEND_HEALTH_VIEW: Record<
 };
 
 const MARKET_NAV_OPTIONS: { key: MarketMode; label: string; title: string; flags: MarketFlag[] }[] = [
-  { key: "us", label: "US", title: "US Market", flags: [{ src: "/flags/us.svg", alt: "US flag" }] },
+  { key: "us", label: "US", title: "US Market", flags: [{ src: "/flags/us.webp?v=1", alt: "US flag", objectPosition: "30% 50%" }] },
   { key: "hk", label: "HK", title: "HK Market", flags: [{ src: "/flags/hk.png?v=1", alt: "Hong Kong flag", objectPosition: "59% 50%" }] },
   { key: "cn", label: "CN", title: "China A-Share Market", flags: [{ src: "/flags/cn.svg?v=2", alt: "China flag" }] },
-  {
-    key: "mixed",
-    label: "Mix",
-    title: "Mixed Market",
-    flags: [
-      { src: "/flags/us.svg", alt: "US flag" },
-      { src: "/flags/hk.png?v=1", alt: "Hong Kong flag", objectPosition: "59% 50%" },
-    ],
-  },
+  { key: "jp", label: "JP", title: "Japan Market", flags: [{ src: "/flags/jp.svg?v=1", alt: "Japan flag" }] },
+  { key: "tw", label: "TW", title: "Taiwan Market", flags: [{ src: "/flags/tw.png?v=1", alt: "Taiwan market emblem" }] },
 ];
 
 const DEFAULT_TICKERS_BY_MARKET: Record<MarketMode, string> = {
   us: "AAPL,NVDA,GOOG,TSM",
   hk: "0005.HK,0007.HK",
   cn: "600519,300750,000001",
-  mixed: "AAPL,NVDA,0005.HK,0007.HK",
+  jp: "7203.T,6758.T,9984.T",
+  tw: "2330.TW,2317.TW,2454.TW",
 };
 
 const MARKET_SELECTION_STORAGE_KEY = "deepfirm.marketMode.v1";
 const MARKET_SNAPSHOT_STORAGE_KEY = "deepfirm.marketSnapshots.v1";
 const MARKET_SNAPSHOT_REFRESH_STORAGE_KEY = "deepfirm.marketSnapshotRefreshedAt.v1";
 const MARKET_SNAPSHOT_AUTO_REFRESH_INTERVAL_MS = 5 * 60_000;
+
+function createEmptyAnalysisViewState(): AnalysisViewState {
+  return {
+    riskData: null,
+    anomalyData: null,
+    regimeData: null,
+    mlForecastData: null,
+    crisisWarningData: null,
+    alphaData: null,
+    alphaStatus: "unavailable",
+    alphaMessage: "",
+    factorAvailableThrough: null,
+    alphaEffectiveStart: null,
+    alphaEffectiveEnd: null,
+    optData: null,
+    reportData: null,
+    reportError: null,
+    analysisCompleted: false,
+  };
+}
+
+function createAnalysisViewStateFromResult(result: AnalysisRunResult): AnalysisViewState {
+  return {
+    riskData: result.risk,
+    anomalyData: result.anomaly ?? null,
+    regimeData: result.regime ?? null,
+    mlForecastData: result.ml_forecast ?? null,
+    crisisWarningData: result.crisis_warning ?? null,
+    alphaData: result.alpha ?? null,
+    alphaStatus: result.alpha_status ?? result.alpha?.alpha_status ?? "unavailable",
+    alphaMessage: result.alpha_message ?? "",
+    factorAvailableThrough: result.factor_available_through ?? result.alpha?.factor_available_through ?? null,
+    alphaEffectiveStart: result.alpha_effective_start ?? result.alpha?.alpha_effective_start ?? null,
+    alphaEffectiveEnd: result.alpha_effective_end ?? result.alpha?.alpha_effective_end ?? null,
+    optData: result.optimization,
+    reportData: null,
+    reportError: null,
+    analysisCompleted: true,
+  };
+}
 
 function MarketFlagImage({ flag, className = "" }: { flag: MarketFlag; className?: string }) {
   return (
@@ -178,18 +229,20 @@ function isCnTicker(ticker: string): boolean {
   return /^\d{6}$/.test(ticker);
 }
 
+function isJpTicker(ticker: string): boolean {
+  return ticker.toUpperCase().endsWith(".T");
+}
+
+function isTwTicker(ticker: string): boolean {
+  const normalized = ticker.toUpperCase();
+  return normalized.endsWith(".TW") || normalized.endsWith(".TWO");
+}
+
 function getMarketValidationError(
   tickerList: string[],
   selectedMarket: MarketMode,
   lang: Lang
 ): string | null {
-  if (selectedMarket === "mixed") {
-    const cnTickers = tickerList.filter(isCnTicker);
-    return cnTickers.length > 0
-      ? `${t(lang, "errorMixedMarketNoCn")} ${cnTickers.join(", ")}`
-      : null;
-  }
-
   if (selectedMarket === "us") {
     const hkTickers = tickerList.filter(hasHkSuffix);
     if (hkTickers.length > 0) {
@@ -199,6 +252,14 @@ function getMarketValidationError(
     if (cnTickers.length > 0) {
       return `${t(lang, "errorUsMarketNoCn")} ${cnTickers.join(", ")}`;
     }
+    const jpTickers = tickerList.filter(isJpTicker);
+    if (jpTickers.length > 0) {
+      return `${t(lang, "errorUsMarketNoJp")} ${jpTickers.join(", ")}`;
+    }
+    const twTickers = tickerList.filter(isTwTicker);
+    if (twTickers.length > 0) {
+      return `${t(lang, "errorUsMarketNoTw")} ${twTickers.join(", ")}`;
+    }
     return null;
   }
 
@@ -206,6 +267,20 @@ function getMarketValidationError(
     const nonCnTickers = tickerList.filter((ticker) => !isCnTicker(ticker));
     return nonCnTickers.length > 0
       ? `${t(lang, "errorCnMarketOnlySixDigit")} ${nonCnTickers.join(", ")}`
+      : null;
+  }
+
+  if (selectedMarket === "jp") {
+    const nonJpTickers = tickerList.filter((ticker) => !isJpTicker(ticker));
+    return nonJpTickers.length > 0
+      ? `${t(lang, "errorJpMarketOnlyT")} ${nonJpTickers.join(", ")}`
+      : null;
+  }
+
+  if (selectedMarket === "tw") {
+    const nonTwTickers = tickerList.filter((ticker) => !isTwTicker(ticker));
+    return nonTwTickers.length > 0
+      ? `${t(lang, "errorTwMarketOnlyTw")} ${nonTwTickers.join(", ")}`
       : null;
   }
 
@@ -371,15 +446,38 @@ export default function Home() {
   const [analysisCompleted, setAnalysisCompleted] = useState(false);
   const [backendHealth, setBackendHealth] = useState<BackendHealth>("checking");
   const [backendHealthMessage, setBackendHealthMessage] = useState("Checking backend health.");
+  const [analysisByMarket, setAnalysisByMarket] = useState<Partial<Record<MarketMode, AnalysisViewState>>>({});
+  const activeMarketRef = useRef<MarketMode>("us");
+
+  const applyAnalysisViewState = useCallback((nextState: AnalysisViewState) => {
+    setRiskData(nextState.riskData);
+    setAnomalyData(nextState.anomalyData);
+    setRegimeData(nextState.regimeData);
+    setMlForecastData(nextState.mlForecastData);
+    setCrisisWarningData(nextState.crisisWarningData);
+    setAlphaData(nextState.alphaData);
+    setAlphaStatus(nextState.alphaStatus);
+    setAlphaMessage(nextState.alphaMessage);
+    setFactorAvailableThrough(nextState.factorAvailableThrough);
+    setAlphaEffectiveStart(nextState.alphaEffectiveStart);
+    setAlphaEffectiveEnd(nextState.alphaEffectiveEnd);
+    setOptData(nextState.optData);
+    setReportData(nextState.reportData);
+    setReportError(nextState.reportError);
+    setAnalysisCompleted(nextState.analysisCompleted);
+  }, []);
 
   const handleMarketChange = useCallback((nextMarket: MarketMode) => {
+    if (nextMarket === activeMarketRef.current) {
+      return;
+    }
+    activeMarketRef.current = nextMarket;
     setMarket(nextMarket);
     setTickers(DEFAULT_TICKERS_BY_MARKET[nextMarket]);
     writeStoredMarketMode(nextMarket);
     setError(null);
-    setReportError(null);
-    setReportData(null);
-  }, []);
+    applyAnalysisViewState(analysisByMarket[nextMarket] ?? createEmptyAnalysisViewState());
+  }, [analysisByMarket, applyAnalysisViewState]);
 
   const handleMarketSnapshotChange = useCallback((snapshot: MarketSnapshotResult) => {
     setMarketSnapshots((current) => {
@@ -406,6 +504,7 @@ export default function Home() {
   useEffect(() => {
     const storedMarket = readStoredMarketMode();
     if (storedMarket) {
+      activeMarketRef.current = storedMarket;
       setMarket(storedMarket);
       setTickers(DEFAULT_TICKERS_BY_MARKET[storedMarket]);
     }
@@ -414,6 +513,11 @@ export default function Home() {
     setMarketReady(true);
     setMarketSnapshotsReady(true);
   }, []);
+
+  useEffect(() => {
+    activeMarketRef.current = market;
+    applyAnalysisViewState(analysisByMarket[market] ?? createEmptyAnalysisViewState());
+  }, [analysisByMarket, applyAnalysisViewState, market]);
 
   useEffect(() => {
     let disposed = false;
@@ -472,7 +576,7 @@ export default function Home() {
   }, [tickers]);
 
   useEffect(() => {
-    if (market === "cn" && activeTab === "alpha") {
+    if ((market === "cn" || market === "jp" || market === "tw") && activeTab === "alpha") {
       setActiveTab("risk");
     }
   }, [market, activeTab]);
@@ -569,6 +673,7 @@ export default function Home() {
       return;
     }
 
+    const requestMarket = analysisReq.market ?? market;
     setLoading(true);
     setAnalysisCompleted(false);
     setMlForecastData(null);
@@ -577,26 +682,23 @@ export default function Home() {
 
     try {
       const result = await postApi<AnalysisRunResult>("/api/v1/analysis/run", analysisReq);
-      setRiskData(result.risk);
-      setAnomalyData(result.anomaly ?? null);
-      setRegimeData(result.regime ?? null);
-      setMlForecastData(result.ml_forecast ?? null);
-      setCrisisWarningData(result.crisis_warning ?? null);
-      setAlphaData(result.alpha ?? null);
-      setAlphaStatus(result.alpha_status ?? result.alpha?.alpha_status ?? "unavailable");
-      setAlphaMessage(result.alpha_message ?? "");
-      setFactorAvailableThrough(result.factor_available_through ?? result.alpha?.factor_available_through ?? null);
-      setAlphaEffectiveStart(result.alpha_effective_start ?? result.alpha?.alpha_effective_start ?? null);
-      setAlphaEffectiveEnd(result.alpha_effective_end ?? result.alpha?.alpha_effective_end ?? null);
-      setOptData(result.optimization);
-      setAnalysisCompleted(true);
+      const nextState = createAnalysisViewStateFromResult(result);
+      setAnalysisByMarket((current) => ({
+        ...current,
+        [requestMarket]: nextState,
+      }));
+      if (activeMarketRef.current === requestMarket) {
+        applyAnalysisViewState(nextState);
+      }
     } catch (err: any) {
-      setError(err.message || "Analysis failed. Please check your inputs and try again.");
-      setAnalysisCompleted(false);
+      if (activeMarketRef.current === requestMarket) {
+        setError(err.message || "Analysis failed. Please check your inputs and try again.");
+        setAnalysisCompleted(false);
+      }
     } finally {
       setLoading(false);
     }
-  }, [buildAnalysisRequest]);
+  }, [applyAnalysisViewState, buildAnalysisRequest, market]);
 
   const refreshRiskReport = useCallback(async (focusReport: boolean) => {
     setReportError(null);
@@ -618,17 +720,45 @@ export default function Home() {
       ...baseRequest,
       language: lang,
     };
+    const requestMarket = reportRequest.market ?? market;
 
     setReportLoading(true);
     try {
       const result = await postApi<RiskReportResult>("/api/v1/risk/report", reportRequest);
-      setReportData(result);
+      setAnalysisByMarket((current) => {
+        const existingState = current[requestMarket] ?? createEmptyAnalysisViewState();
+        return {
+          ...current,
+          [requestMarket]: {
+            ...existingState,
+            reportData: result,
+            reportError: null,
+          },
+        };
+      });
+      if (activeMarketRef.current === requestMarket) {
+        setReportData(result);
+        setReportError(null);
+      }
     } catch (err: any) {
-      setReportError(err.message || "Report generation failed. Please check your inputs and try again.");
+      const nextReportError = err.message || "Report generation failed. Please check your inputs and try again.";
+      setAnalysisByMarket((current) => {
+        const existingState = current[requestMarket] ?? createEmptyAnalysisViewState();
+        return {
+          ...current,
+          [requestMarket]: {
+            ...existingState,
+            reportError: nextReportError,
+          },
+        };
+      });
+      if (activeMarketRef.current === requestMarket) {
+        setReportError(nextReportError);
+      }
     } finally {
       setReportLoading(false);
     }
-  }, [buildAnalysisRequest, lang]);
+  }, [buildAnalysisRequest, lang, market]);
 
   const handleGenerateReport = useCallback(() => {
     void refreshRiskReport(true);
@@ -722,7 +852,8 @@ export default function Home() {
     { key: "decision", label: t(lang, "decision"), desktopLabel: t(lang, "decision"), mobileLabel: t(lang, "decision"), icon: SlidersHorizontal },
     { key: "report", label: t(lang, "report"), desktopLabel: t(lang, "report"), mobileLabel: t(lang, "reportMobile"), icon: FileText },
   ];
-  const tabs = allTabs.filter((tab) => market !== "cn" || tab.key !== "alpha");
+  const alphaHidden = market === "cn" || market === "jp" || market === "tw";
+  const tabs = allTabs.filter((tab) => !alphaHidden || tab.key !== "alpha");
   const currencySymbol = getCurrencySymbol(market);
   const mobileGridClass =
     tabs.length === 7 ? "grid-cols-7" : tabs.length === 6 ? "grid-cols-6" : tabs.length === 5 ? "grid-cols-5" : "grid-cols-4";
@@ -735,12 +866,14 @@ export default function Home() {
     marketReady &&
     marketSnapshotsReady &&
     shouldAutoRefreshMarketSnapshot(marketSnapshotRefreshTimes[market], Boolean(currentMarketSnapshot));
+  const tickerPlaceholder = DEFAULT_TICKERS_BY_MARKET[market].split(",").join(", ");
 
   return (
     <div className="flex min-h-screen lg:h-screen lg:overflow-hidden">
       <Sidebar
         tickers={tickers}
         setTickers={setTickers}
+        tickerPlaceholder={tickerPlaceholder}
         timeWindow={timeWindow}
         setTimeWindow={setTimeWindow}
         weights={weights}
@@ -926,7 +1059,7 @@ export default function Home() {
           {activeTab === "risk" && <RiskTab data={riskData} anomaly={anomalyData} regime={regimeData} loading={loading} lang={lang} currencySymbol={currencySymbol} />}
           {activeTab === "crisis" && <CrisisWarningTab crisisWarning={crisisWarningData} loading={loading} hasAnalysisRun={analysisCompleted} lang={lang} />}
           {activeTab === "ml" && <MachineLearningTab data={riskData} anomaly={anomalyData} regime={regimeData} mlForecast={mlForecastData} loading={loading} lang={lang} />}
-          {market !== "cn" && activeTab === "alpha" && (
+          {!alphaHidden && activeTab === "alpha" && (
             <AlphaTab
               data={alphaData}
               loading={loading}
@@ -952,13 +1085,11 @@ export default function Home() {
             />
           )}
 
-          {activeTab !== "welcome" && (
-            <footer className="mt-auto pt-8 pb-2 text-center">
-              <span className="inline-flex items-center justify-center rounded-full border border-df-border bg-df-surface/80 px-3.5 py-1.5 text-[11px] font-medium text-df-text-secondary shadow-[0_10px_24px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:bg-df-surface/70">
-                {t(lang, "footerCredit")}
-              </span>
-            </footer>
-          )}
+          <footer className="mt-auto pt-8 pb-2 text-center">
+            <span className="inline-flex items-center justify-center rounded-full border border-df-border bg-df-surface/80 px-3.5 py-1.5 text-[11px] font-medium text-df-text-secondary shadow-[0_10px_24px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:bg-df-surface/70">
+              {t(lang, "footerCredit")}
+            </span>
+          </footer>
         </div>
       </main>
 

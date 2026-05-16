@@ -15,8 +15,8 @@ class AlignmentRequest(BaseModel):
 
     left: pd.Series = Field(...)
     right: pd.Series = Field(...)
-    left_market: Literal["NYSE", "HKEX", "SSE"]
-    right_market: Literal["NYSE", "HKEX", "SSE"]
+    left_market: Literal["NYSE", "HKEX", "SSE", "JPX", "XTAI"]
+    right_market: Literal["NYSE", "HKEX", "SSE", "JPX", "XTAI"]
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -46,7 +46,7 @@ class MarketAligner:
     """Align financial time series using official exchange calendars."""
 
     def __init__(self) -> None:
-        self._supported_markets = {"NYSE", "HKEX", "SSE"}
+        self._supported_markets = {"NYSE", "HKEX", "SSE", "JPX", "XTAI"}
 
     def _normalize_index(self, series: pd.Series) -> pd.Series:
         """Strip timezone and truncate to date-level precision."""
