@@ -15,6 +15,7 @@ import statsmodels.api as sm
 from pydantic import BaseModel, Field
 
 from data_pipeline.exceptions import DataFetcherError
+from data_pipeline.provenance import DataQuality
 
 
 class FactorRegressionResult(BaseModel):
@@ -44,6 +45,7 @@ class FactorRegressionResult(BaseModel):
     source: str = Field(default="unknown", description="Data source used for prices")
     source_detail: str = Field(default="unknown", description="Detailed price data provenance")
     data_warnings: list[str] = Field(default_factory=list, description="Non-fatal data quality warnings")
+    data_quality: DataQuality = Field(default_factory=DataQuality, description="Unified data quality provenance")
     factor_source: str = Field(default="unknown", description="Data source used for factors")
     factor_is_synthetic: bool = Field(default=False, description="Whether factor data is synthetic")
     alpha_status: Literal["available", "truncated"] = Field(default="available")

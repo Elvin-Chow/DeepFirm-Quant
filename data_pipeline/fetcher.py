@@ -5,6 +5,7 @@ import importlib
 import os
 import threading
 import time
+from dataclasses import dataclass
 from datetime import date, datetime, time as datetime_time, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
@@ -17,6 +18,7 @@ from yfinance.exceptions import YFRateLimitError
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from data_pipeline.exceptions import DataFetcherError
+from data_pipeline.provenance import DataQuality
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +68,25 @@ class FetchResponse(BaseModel):
     start_date: date
     end_date: date
     data: pd.DataFrame
+    data_quality: DataQuality = Field(default_factory=DataQuality)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @field_serializer("data")
     def serialize_data(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
         return data.to_dict(orient="records")
+
+
+@dataclass(frozen=True)
+class _CacheReadResult:
+    """Internal cache read result with separate stale and partial flags."""
+
+    data: pd.DataFrame
+    is_stale: bool
+    is_partial: bool
+    provider: str
+    coverage_ratio: float
+    asof_date: Optional[str]
 
 
 class SmartFetcher:
@@ -98,6 +113,8 @@ class SmartFetcher:
         self.last_source = "unknown"
         self.last_source_detail = "unknown"
         self.data_warnings: List[str] = []
+        self.last_data_quality = DataQuality()
+        self._provider_chain: List[str] = []
         self.allow_sandbox_data = allow_sandbox_data
         self.cache_expire_hours = cache_expire_hours
         self.cache_enabled = os.getenv("DFQ_DISABLE_CACHE", "").lower() not in {
@@ -230,7 +247,7 @@ class SmartFetcher:
         end_date: date,
         allow_partial: bool,
         require_exact_end: bool = False,
-    ) -> Optional[Tuple[pd.DataFrame, bool]]:
+    ) -> Optional[Tuple[pd.DataFrame, bool, float]]:
         """Return cached prices when they cover the requested window."""
         normalized = self._normalize_price_frame(df)
         if normalized.empty:
@@ -247,17 +264,18 @@ class SmartFetcher:
         expected_start, expected_end = self._expected_cache_bounds(start_date, end_date)
         first_date = pd.Timestamp(filtered["Date"].min())
         last_date = pd.Timestamp(filtered["Date"].max())
-        complete_tolerance = pd.Timedelta(days=0 if require_exact_end else 3)
+        expected_rows = max(2, len(pd.date_range(start_date, end_date, freq="B")))
+        coverage_ratio = float(np.clip(len(filtered) / expected_rows, 0.0, 1.0))
+        complete_tolerance = pd.Timedelta(days=0 if require_exact_end or allow_partial else 3)
         covers_start = first_date <= expected_start + complete_tolerance
         covers_end = last_date >= expected_end - complete_tolerance
         has_full_coverage = covers_start and covers_end
         if has_full_coverage:
-            return filtered.reset_index(drop=True), False
+            return filtered.reset_index(drop=True), False, coverage_ratio
 
-        expected_rows = max(2, len(pd.date_range(start_date, end_date, freq="B")))
         enough_rows = len(filtered) >= max(2, int(expected_rows * 0.60))
         if allow_partial and covers_start and enough_rows:
-            return filtered.reset_index(drop=True), True
+            return filtered.reset_index(drop=True), True, coverage_ratio
         return None
 
     def _read_price_cache(
@@ -268,7 +286,7 @@ class SmartFetcher:
         end_date: date,
         allow_stale: bool = False,
         allow_partial: bool = False,
-    ) -> Optional[Tuple[pd.DataFrame, bool, str]]:
+    ) -> Optional[_CacheReadResult]:
         """Read symbol-level or legacy exact-window cache data."""
         if self._bypass_cache_reads or not self.cache_enabled or self._result_cache_dir is None:
             return None
@@ -296,20 +314,21 @@ class SmartFetcher:
                 )
                 if sliced is None:
                     continue
-                result_df, is_partial = sliced
-                provider = "unknown"
-                if "__provider" in cached_df.columns:
-                    providers = cached_df["__provider"].dropna().astype(str).unique()
-                    if len(providers) == 1:
-                        provider = providers[0]
-                    elif len(providers) > 1:
-                        provider = "mixed"
+                result_df, is_partial, coverage_ratio = sliced
+                provider = self._providers_from_frame(result_df)
                 provider_columns = [
                     column for column in result_df.columns
                     if str(column).startswith("__provider")
                 ]
                 result_df = result_df.drop(columns=provider_columns, errors="ignore")
-                return result_df, bool(is_partial), provider
+                return _CacheReadResult(
+                    data=result_df,
+                    is_stale=bool(is_expired),
+                    is_partial=bool(is_partial),
+                    provider=provider,
+                    coverage_ratio=coverage_ratio,
+                    asof_date=self._asof_date_from_frame(result_df),
+                )
             except Exception as exc:
                 logger.warning("price cache read skipped for %s: %s", symbol, exc)
         return None
@@ -325,7 +344,7 @@ class SmartFetcher:
         cached = self._read_price_cache(source, symbol, start_date, end_date)
         if cached is None:
             return None
-        return cached[0]
+        return cached.data
 
     def _write_result_cache(
         self,
@@ -366,6 +385,152 @@ class SmartFetcher:
             normalized.to_parquet(exact_path, index=False)
         except Exception as exc:
             logger.warning("result cache write skipped for %s: %s", symbol, exc)
+
+    @staticmethod
+    def _calendar_for_source(source: str) -> str:
+        """Return the exchange calendar label for a fetcher source."""
+        return {
+            "us_equity": "NYSE",
+            "hk_equity": "HKEX",
+            "jp_equity": "JPX",
+            "tw_equity": "XTAI",
+            "china_equity": "SSE",
+            "china_macro": "SSE",
+        }.get(source, "unknown")
+
+    @staticmethod
+    def _provider_values(provider: str) -> List[str]:
+        """Return clean provider labels from a cache metadata value."""
+        if not provider or provider == "unknown":
+            return []
+        providers: List[str] = []
+        for item in str(provider).replace("|", ",").split(","):
+            text = item.strip()
+            if text and text not in providers:
+                providers.append(text)
+        return providers
+
+    @staticmethod
+    def _providers_from_frame(df: pd.DataFrame) -> str:
+        """Return provider metadata from a cached result slice."""
+        provider_columns = [
+            column for column in df.columns
+            if str(column).startswith("__provider")
+        ]
+        providers: List[str] = []
+        for column in provider_columns:
+            for value in df[column].dropna().astype(str).tolist():
+                text = value.strip()
+                if text and text != "unknown" and text not in providers:
+                    providers.append(text)
+        if not providers:
+            return "unknown"
+        return ",".join(sorted(providers))
+
+    @staticmethod
+    def _asof_date_from_frame(df: pd.DataFrame) -> Optional[str]:
+        """Return the latest normalized date in a price frame."""
+        normalized = SmartFetcher._normalize_price_frame(df)
+        if normalized.empty:
+            return None
+        latest = pd.to_datetime(normalized["Date"], errors="coerce").dropna()
+        if latest.empty:
+            return None
+        return pd.Timestamp(latest.max()).strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _coverage_ratio_from_frame(
+        df: pd.DataFrame,
+        start_date: date,
+        end_date: date,
+    ) -> float:
+        """Estimate business-day coverage for a fetched price frame."""
+        expected_days = pd.date_range(start_date, end_date, freq="B")
+        if len(expected_days) == 0:
+            return 1.0
+
+        normalized = SmartFetcher._normalize_price_frame(df)
+        if normalized.empty:
+            return 0.0
+        observed_days = pd.DatetimeIndex(
+            pd.to_datetime(normalized["Date"], errors="coerce").dropna()
+        ).normalize()
+        covered_days = observed_days.intersection(expected_days)
+        return float(np.clip(len(covered_days) / len(expected_days), 0.0, 1.0))
+
+    def _append_provider_chain(self, providers: List[str]) -> List[str]:
+        """Append providers to the request-level provider chain once."""
+        for provider in providers:
+            text = str(provider).strip()
+            if text and text not in self._provider_chain:
+                self._provider_chain.append(text)
+        return list(self._provider_chain)
+
+    def _live_cache_status(self) -> str:
+        """Return cache status when a live provider supplied the data."""
+        if self._bypass_cache_reads:
+            return "bypassed"
+        if not self.cache_enabled:
+            return "disabled"
+        return "miss"
+
+    @staticmethod
+    def _cache_status(is_stale: bool, is_partial: bool) -> str:
+        """Return a cache status label from cache freshness and coverage."""
+        if is_stale and is_partial:
+            return "stale_partial"
+        if is_stale:
+            return "stale_cache"
+        if is_partial:
+            return "partial"
+        return "hit"
+
+    def _mark_data_quality(
+        self,
+        source: str,
+        start_date: date,
+        end_date: date,
+        df: Optional[pd.DataFrame] = None,
+        cache_status: str = "unknown",
+        is_stale: bool = False,
+        is_partial: bool = False,
+        provider_chain: Optional[List[str]] = None,
+        coverage_ratio: Optional[float] = None,
+        asof_date: Optional[str] = None,
+        warnings: Optional[List[str]] = None,
+    ) -> DataQuality:
+        """Store the latest request-level data quality metadata."""
+        if provider_chain:
+            self._append_provider_chain(provider_chain)
+        elif self.last_source and self.last_source != "unknown":
+            self._append_provider_chain([self.last_source])
+
+        if df is not None:
+            asof_date = asof_date or self._asof_date_from_frame(df)
+            coverage_ratio = (
+                self._coverage_ratio_from_frame(df, start_date, end_date)
+                if coverage_ratio is None
+                else coverage_ratio
+            )
+        if coverage_ratio is None:
+            coverage_ratio = self.last_data_quality.coverage_ratio
+
+        merged_warnings: List[str] = []
+        for warning in [*self.data_warnings, *(warnings or [])]:
+            if warning and warning not in merged_warnings:
+                merged_warnings.append(warning)
+
+        self.last_data_quality = DataQuality(
+            asof_date=asof_date,
+            coverage_ratio=float(np.clip(coverage_ratio, 0.0, 1.0)),
+            calendar=self._calendar_for_source(source),
+            cache_status=cache_status,
+            is_stale=is_stale,
+            is_partial=is_partial,
+            provider_chain=list(self._provider_chain),
+            warnings=merged_warnings,
+        )
+        return self.last_data_quality
 
     def _mark_source(self, source: str, detail: str) -> None:
         """Store the most recent data source metadata."""
@@ -444,11 +609,24 @@ class SmartFetcher:
         return f"{clean_symbol}.SS"
 
     @staticmethod
-    def _cache_detail(stale: bool, provider: str) -> Tuple[str, str]:
+    def _cache_detail(is_stale: bool, is_partial: bool, provider: str) -> Tuple[str, str]:
         """Return normalized cache source and detail labels."""
         clean_provider = provider if provider and provider != "unknown" else "yfinance"
-        source = "stale_cache" if stale else "cache"
-        prefix = "stale cache" if stale else "cache"
+        if is_stale:
+            source = "stale_cache"
+        elif is_partial:
+            source = "partial_cache"
+        else:
+            source = "cache"
+
+        if is_stale and is_partial:
+            prefix = "stale partial cache"
+        elif is_stale:
+            prefix = "stale cache"
+        elif is_partial:
+            prefix = "partial cache"
+        else:
+            prefix = "cache"
         return source, f"{prefix} ({clean_provider})"
 
     def _cache_response(
@@ -472,13 +650,31 @@ class SmartFetcher:
         if cached is None:
             return None
 
-        df, stale, provider = cached
-        source, detail = self._cache_detail(stale, provider)
+        df = cached.data
+        provider = cached.provider
+        source, detail = self._cache_detail(
+            cached.is_stale,
+            cached.is_partial,
+            provider,
+        )
         self._mark_source(source, detail)
-        if stale:
+        if cached.is_stale or cached.is_partial:
+            qualifier = "stale cached" if cached.is_stale else "partial cached"
             self._append_warning(
-                f"{symbol}: using cached prices because live data is temporarily unavailable"
+                f"{symbol}: using {qualifier} prices because live data is temporarily unavailable or incomplete"
             )
+        quality = self._mark_data_quality(
+            market,
+            start_date,
+            end_date,
+            df=df,
+            cache_status=self._cache_status(cached.is_stale, cached.is_partial),
+            is_stale=cached.is_stale,
+            is_partial=cached.is_partial,
+            provider_chain=self._provider_values(provider),
+            coverage_ratio=cached.coverage_ratio,
+            asof_date=cached.asof_date,
+        )
         return FetchResponse(
             symbol=symbol,
             source=market,
@@ -486,6 +682,7 @@ class SmartFetcher:
             start_date=start_date,
             end_date=end_date,
             data=df,
+            data_quality=quality,
         )
 
     @classmethod
@@ -669,6 +866,14 @@ class SmartFetcher:
                 SmartFetcher._yf_last_call_time = time.time()
                 self._write_result_cache(df, market, symbol, start_date, end_date, provider="yahoo_chart")
                 self._mark_source("yahoo_chart", "Yahoo Finance chart API")
+                quality = self._mark_data_quality(
+                    market,
+                    start_date,
+                    end_date,
+                    df=df,
+                    cache_status=self._live_cache_status(),
+                    provider_chain=["yahoo_chart"],
+                )
                 return FetchResponse(
                     symbol=symbol,
                     source=market,
@@ -676,9 +881,11 @@ class SmartFetcher:
                     start_date=start_date,
                     end_date=end_date,
                     data=df,
+                    data_quality=quality,
                 )
             except Exception as chart_exc:
                 self._register_yahoo_chart_failure(chart_exc)
+                self._append_provider_chain(["yahoo_chart"])
                 logger.warning("Yahoo chart API failed for %s: %s", symbol, chart_exc)
 
             self._respect_yf_rate_limit()
@@ -693,6 +900,7 @@ class SmartFetcher:
                 SmartFetcher._yf_last_call_time = time.time()
             except Exception as exc:
                 self._register_yf_failure(exc)
+                self._append_provider_chain(["yfinance"])
                 raise DataFetcherError(
                     message=f"yfinance failed for {symbol}: {exc}",
                     symbol=symbol,
@@ -710,6 +918,14 @@ class SmartFetcher:
 
             self._write_result_cache(df, market, symbol, start_date, end_date, provider="yfinance")
             self._mark_source("yfinance", "yfinance")
+            quality = self._mark_data_quality(
+                market,
+                start_date,
+                end_date,
+                df=df,
+                cache_status=self._live_cache_status(),
+                provider_chain=["yfinance"],
+            )
             return FetchResponse(
                 symbol=symbol,
                 source=market,
@@ -717,6 +933,7 @@ class SmartFetcher:
                 start_date=start_date,
                 end_date=end_date,
                 data=df,
+                data_quality=quality,
             )
 
     def _fetch_tiingo(self, symbol: str, start_date: date, end_date: date) -> pd.DataFrame:
@@ -825,6 +1042,14 @@ class SmartFetcher:
                         provider="tiingo",
                     )
                     self._mark_source("tiingo", "tiingo")
+                    quality = self._mark_data_quality(
+                        market,
+                        start_date,
+                        end_date,
+                        df=df,
+                        cache_status=self._live_cache_status(),
+                        provider_chain=["tiingo"],
+                    )
                     return FetchResponse(
                         symbol=symbol,
                         source=market,
@@ -832,9 +1057,11 @@ class SmartFetcher:
                         start_date=start_date,
                         end_date=end_date,
                         data=df,
+                        data_quality=quality,
                     )
             except Exception as exc:
                 provider_errors.append(self._format_error("tiingo", exc))
+                self._append_provider_chain(["tiingo"])
                 logger.warning("tiingo failed for %s: %s", symbol, exc)
 
         stale_cached = self._cache_response(
@@ -862,6 +1089,14 @@ class SmartFetcher:
         df = self._fetch_sandbox(symbol, start_date, end_date)
         self._mark_source("sandbox", "sandbox demo")
         self._append_warning(f"{symbol}: using sandbox demo prices")
+        quality = self._mark_data_quality(
+            market,
+            start_date,
+            end_date,
+            df=df,
+            cache_status=self._live_cache_status(),
+            provider_chain=["sandbox"],
+        )
         return FetchResponse(
             symbol=symbol,
             source=market,
@@ -869,6 +1104,7 @@ class SmartFetcher:
             start_date=start_date,
             end_date=end_date,
             data=df,
+            data_quality=quality,
         )
 
     def fetch_us_equity(
@@ -941,9 +1177,13 @@ class SmartFetcher:
                 if cached is None:
                     still_missing.append(ticker)
                     continue
-                df, stale, provider = cached
-                cached_frames[ticker] = df
-                source_labels[ticker] = self._cache_detail(stale, provider)[0]
+                cached_frames[ticker] = cached.data
+                source_labels[ticker] = (
+                    "stale_partial_cache"
+                    if cached.is_stale and cached.is_partial
+                    else self._cache_detail(cached.is_stale, cached.is_partial, cached.provider)[0]
+                )
+                self._append_provider_chain(self._provider_values(cached.provider))
 
             if not still_missing:
                 return
@@ -965,8 +1205,10 @@ class SmartFetcher:
                     )
                     cached_frames[ticker] = df
                     source_labels[ticker] = "yahoo_chart"
+                    self._append_provider_chain(["yahoo_chart"])
                 except Exception as exc:
                     self._register_yahoo_chart_failure(exc)
+                    self._append_provider_chain(["yahoo_chart"])
                     logger.warning("Yahoo chart API failed for %s: %s", ticker, exc)
                     chart_missing.append(ticker)
 
@@ -989,6 +1231,7 @@ class SmartFetcher:
                 SmartFetcher._yf_last_call_time = time.time()
             except Exception as exc:
                 self._register_yf_failure(exc)
+                self._append_provider_chain(["yfinance"])
                 raise DataFetcherError(
                     message=f"yfinance batch download failed: {exc}",
                     symbol=",".join(chart_missing),
@@ -1024,22 +1267,78 @@ class SmartFetcher:
                 )
                 cached_frames[ticker] = df
                 source_labels[ticker] = "yfinance"
+                self._append_provider_chain(["yfinance"])
 
-    def _mark_batch_source(self, source_labels: Dict[str, str]) -> None:
+    @staticmethod
+    def _coverage_ratio_from_index(
+        index: pd.Index,
+        start_date: date,
+        end_date: date,
+    ) -> float:
+        """Estimate business-day coverage from an aligned price index."""
+        expected_days = pd.date_range(start_date, end_date, freq="B")
+        if len(expected_days) == 0:
+            return 1.0
+        observed_days = pd.DatetimeIndex(pd.to_datetime(index, errors="coerce")).dropna()
+        observed_days = observed_days.tz_localize(None).normalize()
+        covered_days = observed_days.intersection(expected_days)
+        return float(np.clip(len(covered_days) / len(expected_days), 0.0, 1.0))
+
+    def _mark_batch_source(
+        self,
+        source_labels: Dict[str, str],
+        market_source: str,
+        start_date: date,
+        end_date: date,
+        aligned: pd.DataFrame,
+    ) -> None:
         """Summarize per-ticker sources into response-level source metadata."""
         if not source_labels:
             self._mark_source("unknown", "unknown")
+            self._mark_data_quality(market_source, start_date, end_date)
             return
         unique_sources = sorted(set(source_labels.values()))
         if len(unique_sources) == 1:
-            source = unique_sources[0]
-            detail = self._cache_detail(source == "stale_cache", "yfinance")[1] if source in {
+            source = "stale_cache" if unique_sources[0] == "stale_partial_cache" else unique_sources[0]
+            detail = self._cache_detail(
+                unique_sources[0] in {"stale_cache", "stale_partial_cache"},
+                unique_sources[0] in {"partial_cache", "stale_partial_cache"},
+                ",".join(self._provider_chain) or "yfinance",
+            )[1] if unique_sources[0] in {
                 "cache",
                 "stale_cache",
+                "partial_cache",
+                "stale_partial_cache",
             } else source
             self._mark_source(source, detail)
-            return
-        self._mark_source("mixed", ", ".join(unique_sources))
+        else:
+            self._mark_source("mixed", ", ".join(unique_sources))
+
+        is_stale = any(source in {"stale_cache", "stale_partial_cache"} for source in unique_sources)
+        is_partial = any(source in {"partial_cache", "stale_partial_cache"} for source in unique_sources)
+        cache_status = (
+            self._cache_status(is_stale, is_partial)
+            if len(unique_sources) == 1 and unique_sources[0] in {
+                "cache",
+                "stale_cache",
+                "partial_cache",
+                "stale_partial_cache",
+            }
+            else "mixed"
+        )
+        asof_date = None
+        if not aligned.empty:
+            asof_date = pd.Timestamp(pd.to_datetime(aligned.index).max()).strftime("%Y-%m-%d")
+        self._mark_data_quality(
+            market_source,
+            start_date,
+            end_date,
+            cache_status=cache_status,
+            is_stale=is_stale,
+            is_partial=is_partial,
+            coverage_ratio=self._coverage_ratio_from_index(aligned.index, start_date, end_date),
+            asof_date=asof_date,
+        )
 
     def fetch_equity_batch(
         self,
@@ -1056,18 +1355,22 @@ class SmartFetcher:
             market = self._market_for_ticker(ticker)
             cached = self._read_price_cache(market, ticker, start_date, end_date)
             if cached is not None:
-                df, stale, provider = cached
-                cached_frames[ticker] = df
-                source_labels[ticker] = self._cache_detail(stale, provider)[0]
-                if stale:
+                cached_frames[ticker] = cached.data
+                source_labels[ticker] = (
+                    "stale_partial_cache"
+                    if cached.is_stale and cached.is_partial
+                    else self._cache_detail(cached.is_stale, cached.is_partial, cached.provider)[0]
+                )
+                self._append_provider_chain(self._provider_values(cached.provider))
+                if cached.is_stale or cached.is_partial:
+                    qualifier = "stale cached" if cached.is_stale else "partial cached"
                     self._append_warning(
-                        f"{ticker}: using cached prices because live data is temporarily unavailable"
+                        f"{ticker}: using {qualifier} prices because live data is temporarily unavailable or incomplete"
                     )
             else:
                 missing_tickers.append(ticker)
 
         if not missing_tickers:
-            self._mark_batch_source(source_labels)
             frames = []
             for ticker, df in cached_frames.items():
                 sub = df.set_index("Date")[["Close"]].rename(columns={"Close": ticker})
@@ -1075,6 +1378,8 @@ class SmartFetcher:
                 frames.append(sub)
             combined = pd.concat(frames, axis=1)
             combined.columns = pd.MultiIndex.from_product([["Close"], combined.columns])
+            market_source = self._market_for_ticker(tickers[0]) if tickers else "us_equity"
+            self._mark_batch_source(source_labels, market_source, start_date, end_date, combined)
             return combined
 
         if missing_tickers:
@@ -1116,11 +1421,11 @@ class SmartFetcher:
             )
             series_list.append(prices)
 
-        self._mark_batch_source(source_labels)
-
         aligned = pd.concat([s.to_frame() for s in series_list], axis=1)
         aligned.index = pd.to_datetime(aligned.index).tz_localize(None).normalize()
         aligned.columns = pd.MultiIndex.from_product([["Close"], aligned.columns])
+        market_source = self._market_for_ticker(tickers[0]) if tickers else "us_equity"
+        self._mark_batch_source(source_labels, market_source, start_date, end_date, aligned)
         return aligned
 
     def fetch_china_equity(
@@ -1132,14 +1437,31 @@ class SmartFetcher:
         """Fetch A-share historical prices via AKShare."""
         cached = self._read_price_cache("china_equity", symbol, start_date, end_date)
         if cached is not None:
-            df, stale, provider = cached
-            cache_provider = provider if provider and provider != "unknown" else "akshare"
-            source, detail = self._cache_detail(stale, cache_provider)
+            df = cached.data
+            cache_provider = cached.provider if cached.provider and cached.provider != "unknown" else "akshare"
+            source, detail = self._cache_detail(
+                cached.is_stale,
+                cached.is_partial,
+                cache_provider,
+            )
             self._mark_source(source, detail)
-            if stale:
+            if cached.is_stale or cached.is_partial:
+                qualifier = "stale cached" if cached.is_stale else "partial cached"
                 self._append_warning(
-                    f"{symbol}: using cached prices because live data is temporarily unavailable"
+                    f"{symbol}: using {qualifier} prices because live data is temporarily unavailable or incomplete"
                 )
+            quality = self._mark_data_quality(
+                "china_equity",
+                start_date,
+                end_date,
+                df=df,
+                cache_status=self._cache_status(cached.is_stale, cached.is_partial),
+                is_stale=cached.is_stale,
+                is_partial=cached.is_partial,
+                provider_chain=self._provider_values(cache_provider),
+                coverage_ratio=cached.coverage_ratio,
+                asof_date=cached.asof_date,
+            )
             return FetchResponse(
                 symbol=symbol,
                 source="china_equity",
@@ -1147,6 +1469,7 @@ class SmartFetcher:
                 start_date=start_date,
                 end_date=end_date,
                 data=df,
+                data_quality=quality,
             )
 
         start_str = start_date.strftime("%Y%m%d")
@@ -1181,6 +1504,14 @@ class SmartFetcher:
                         provider="akshare",
                     )
                     self._mark_source("akshare", "AKShare A-share daily qfq")
+                    quality = self._mark_data_quality(
+                        "china_equity",
+                        start_date,
+                        end_date,
+                        df=df,
+                        cache_status=self._live_cache_status(),
+                        provider_chain=["akshare"],
+                    )
                     return FetchResponse(
                         symbol=symbol,
                         source="china_equity",
@@ -1188,10 +1519,12 @@ class SmartFetcher:
                         start_date=start_date,
                         end_date=end_date,
                         data=df,
+                        data_quality=quality,
                     )
                 except Exception as exc:
                     self._register_china_akshare_failure()
                     provider_errors.append(self._format_error("akshare", exc))
+                    self._append_provider_chain(["akshare"])
                     logger.warning("AKShare A-share fetch failed for %s: %s", symbol, exc)
                     if attempt < self._akshare_attempts() - 1:
                         time.sleep(0.5)
@@ -1217,6 +1550,14 @@ class SmartFetcher:
             self._append_warning(
                 f"{symbol}: AKShare A-share data was unavailable; using Yahoo Finance fallback"
             )
+            quality = self._mark_data_quality(
+                "china_equity",
+                start_date,
+                end_date,
+                df=df,
+                cache_status=self._live_cache_status(),
+                provider_chain=["yahoo_chart_cn"],
+            )
             return FetchResponse(
                 symbol=symbol,
                 source="china_equity",
@@ -1224,9 +1565,11 @@ class SmartFetcher:
                 start_date=start_date,
                 end_date=end_date,
                 data=df,
+                data_quality=quality,
             )
         except Exception as exc:
             provider_errors.append(self._format_error("yahoo_chart", exc))
+            self._append_provider_chain(["yahoo_chart_cn"])
             logger.warning("Yahoo A-share fallback failed for %s: %s", symbol, exc)
 
         stale_cached = self._read_price_cache(
@@ -1238,12 +1581,33 @@ class SmartFetcher:
             allow_partial=True,
         )
         if stale_cached is not None:
-            df, stale, provider = stale_cached
-            cache_provider = provider if provider and provider != "unknown" else "akshare"
-            source, detail = self._cache_detail(stale, cache_provider)
+            df = stale_cached.data
+            cache_provider = (
+                stale_cached.provider
+                if stale_cached.provider and stale_cached.provider != "unknown"
+                else "akshare"
+            )
+            source, detail = self._cache_detail(
+                stale_cached.is_stale,
+                stale_cached.is_partial,
+                cache_provider,
+            )
             self._mark_source(source, detail)
+            qualifier = "stale cached" if stale_cached.is_stale else "partial cached"
             self._append_warning(
-                f"{symbol}: using cached prices because live data is temporarily unavailable"
+                f"{symbol}: using {qualifier} prices because live data is temporarily unavailable or incomplete"
+            )
+            quality = self._mark_data_quality(
+                "china_equity",
+                start_date,
+                end_date,
+                df=df,
+                cache_status=self._cache_status(stale_cached.is_stale, stale_cached.is_partial),
+                is_stale=stale_cached.is_stale,
+                is_partial=stale_cached.is_partial,
+                provider_chain=self._provider_values(cache_provider),
+                coverage_ratio=stale_cached.coverage_ratio,
+                asof_date=stale_cached.asof_date,
             )
             return FetchResponse(
                 symbol=symbol,
@@ -1252,12 +1616,21 @@ class SmartFetcher:
                 start_date=start_date,
                 end_date=end_date,
                 data=df,
+                data_quality=quality,
             )
 
         if self.allow_sandbox_data:
             df = self._fetch_sandbox(symbol, start_date, end_date)
             self._mark_source("sandbox", "sandbox demo")
             self._append_warning(f"{symbol}: using sandbox demo prices")
+            quality = self._mark_data_quality(
+                "china_equity",
+                start_date,
+                end_date,
+                df=df,
+                cache_status=self._live_cache_status(),
+                provider_chain=["sandbox"],
+            )
             return FetchResponse(
                 symbol=symbol,
                 source="china_equity",
@@ -1265,6 +1638,7 @@ class SmartFetcher:
                 start_date=start_date,
                 end_date=end_date,
                 data=df,
+                data_quality=quality,
             )
 
         details = "; ".join(provider_errors) if provider_errors else "no live provider returned data"
@@ -1302,6 +1676,15 @@ class SmartFetcher:
                 break
 
         if date_col is None:
+            self._mark_source("akshare", "AKShare China macro")
+            quality = self._mark_data_quality(
+                "china_macro",
+                start_date,
+                end_date,
+                df=df,
+                cache_status=self._live_cache_status(),
+                provider_chain=["akshare"],
+            )
             return FetchResponse(
                 symbol=indicator,
                 source="china_macro",
@@ -1309,6 +1692,7 @@ class SmartFetcher:
                 start_date=start_date,
                 end_date=end_date,
                 data=df,
+                data_quality=quality,
             )
 
         df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
@@ -1317,7 +1701,15 @@ class SmartFetcher:
         ) & (df[date_col] <= pd.Timestamp(end_date))
         df = df.loc[mask].copy()
 
-        self.last_source = "akshare"
+        self._mark_source("akshare", "AKShare China macro")
+        quality = self._mark_data_quality(
+            "china_macro",
+            start_date,
+            end_date,
+            df=df,
+            cache_status=self._live_cache_status(),
+            provider_chain=["akshare"],
+        )
         return FetchResponse(
             symbol=indicator,
             source="china_macro",
@@ -1325,6 +1717,7 @@ class SmartFetcher:
             start_date=start_date,
             end_date=end_date,
             data=df,
+            data_quality=quality,
         )
 
     def fetch(self, request: FetchRequest) -> FetchResponse:

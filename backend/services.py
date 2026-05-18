@@ -33,7 +33,7 @@ from backend.schemas import (
     RiskReportSection,
     RiskReportTraditionalRisk,
 )
-from data_pipeline import MarketAligner, SmartFetcher
+from data_pipeline import DataQuality, MarketAligner, SmartFetcher
 from data_pipeline.exceptions import DataFetcherError
 from models.market_validation import MarketMode
 from models import (
@@ -87,8 +87,7 @@ HK_RISK_FREE_NAME = "HKD 91D EFB"
 HK_RISK_FREE_SOURCE_DETAIL = "HKMA 91-day Exchange Fund Bills yield"
 HK_RISK_FREE_FALLBACK_DETAIL = "HKMA 91-day Exchange Fund Bills fallback (2.00% annualized)"
 HKMA_EFBN_YIELD_DAILY_URL = (
-    "https://api.hkma.gov.hk/public/market-data-and-statistics/"
-    "monthly-statistical-bulletin/efbn/efbn-yield-daily"
+    "https://api.hkma.gov.hk/public/market-data-and-statistics/" "monthly-statistical-bulletin/efbn/efbn-yield-daily"
 )
 DEFAULT_CN_RISK_FREE_RATE = 0.02
 CN_RISK_FREE_SYMBOL = "CHINABOND_CGB_3M"
@@ -117,10 +116,19 @@ REPORT_CURRENCY_BY_MARKET: dict[MarketMode, str] = {
     "jp": "JPY",
     "tw": "TWD",
 }
+ALPHA_UNSUPPORTED_MARKET_MESSAGES: dict[MarketMode, str] = {
+    "hk": "Hong Kong market factor attribution is disabled because HK-local factors are not configured.",
+    "cn": "China A-share factor attribution is not supported yet.",
+    "jp": "Japan market factor attribution is not supported yet.",
+    "tw": "Taiwan market factor attribution is not supported yet.",
+}
 
 
 class PortfolioAnalysisService:
     """Coordinate data fetching, analytics modules, and optimization results."""
+
+    PRICE_FORWARD_FILL_LIMIT = 1
+    RATE_FORWARD_FILL_LIMIT = 5
 
     def __init__(
         self,
@@ -147,16 +155,150 @@ class PortfolioAnalysisService:
         return SmartFetcher(api_key=api_key, allow_sandbox_data=allow_sandbox_data)
 
     @staticmethod
-    def attach_data_provenance(result: BaseModel, fetcher: SmartFetcher) -> None:
+    def _status_from_source(source: str) -> tuple[str, bool, bool]:
+        """Infer cache quality status from a legacy source label."""
+        normalized = (source or "").strip().lower()
+        if normalized == "stale_cache":
+            return "stale_cache", True, False
+        if normalized == "partial_cache":
+            return "partial", False, True
+        if normalized == "cache":
+            return "hit", False, False
+        if normalized == "mixed":
+            return "mixed", False, False
+        if normalized in {"unknown", ""}:
+            return "unknown", False, False
+        return "miss", False, False
+
+    @classmethod
+    def data_quality_from_fetcher(
+        cls,
+        fetcher: object,
+        extra_warnings: Optional[List[str]] = None,
+    ) -> DataQuality:
+        """Return unified data quality metadata from a fetcher-like object."""
+        base = getattr(fetcher, "last_data_quality", None)
+        base_has_provenance = (
+            isinstance(base, DataQuality)
+            and (
+                base.cache_status != "unknown"
+                or bool(base.provider_chain)
+                or base.asof_date is not None
+            )
+        )
+        if base_has_provenance:
+            quality = base
+        else:
+            source = str(getattr(fetcher, "last_source", "unknown") or "unknown")
+            cache_status, is_stale, is_partial = cls._status_from_source(source)
+            provider_chain = [] if source == "unknown" else [source]
+            quality = DataQuality(
+                cache_status=cache_status,
+                is_stale=is_stale,
+                is_partial=is_partial,
+                provider_chain=provider_chain,
+            )
+
+        warnings: List[str] = []
+        for warning in [
+            *list(getattr(fetcher, "data_warnings", []) or []),
+            *quality.warnings,
+            *(extra_warnings or []),
+        ]:
+            text = str(warning).strip()
+            if text and text not in warnings:
+                warnings.append(text)
+        return quality.model_copy(update={"warnings": warnings})
+
+    @classmethod
+    def data_quality_from_result(
+        cls,
+        result: object,
+        warnings: Optional[List[str]] = None,
+    ) -> DataQuality:
+        """Return unified data quality metadata from an existing result."""
+        base = getattr(result, "data_quality", None)
+        if not isinstance(base, DataQuality):
+            source = str(getattr(result, "source", "unknown") or "unknown")
+            cache_status, is_stale, is_partial = cls._status_from_source(source)
+            base = DataQuality(
+                cache_status=cache_status,
+                is_stale=is_stale,
+                is_partial=is_partial,
+                provider_chain=[] if source == "unknown" else [source],
+            )
+        result_warnings = list(getattr(result, "data_warnings", []) or [])
+        return base.with_warnings([*result_warnings, *(warnings or [])])
+
+    @staticmethod
+    def attach_data_provenance(
+        result: BaseModel,
+        fetcher: SmartFetcher,
+        extra_warnings: Optional[List[str]] = None,
+    ) -> None:
         """Attach price data provenance fields to a response model."""
         setattr(result, "source", fetcher.last_source)
         setattr(result, "source_detail", fetcher.last_source_detail)
         existing_warnings = list(getattr(result, "data_warnings", []) or [])
         merged_warnings = existing_warnings.copy()
-        for warning in fetcher.data_warnings:
+        for warning in [*fetcher.data_warnings, *(extra_warnings or [])]:
             if warning not in merged_warnings:
                 merged_warnings.append(warning)
         setattr(result, "data_warnings", merged_warnings)
+        setattr(
+            result,
+            "data_quality",
+            PortfolioAnalysisService.data_quality_from_fetcher(fetcher, merged_warnings),
+        )
+
+    @staticmethod
+    def coverage_warnings_from_frame(price_df: pd.DataFrame) -> List[str]:
+        """Return alignment warnings attached to a price frame."""
+        raw_warnings = price_df.attrs.get("coverage_warnings", [])
+        if not isinstance(raw_warnings, list):
+            return []
+        return [str(warning) for warning in raw_warnings if str(warning)]
+
+    @staticmethod
+    def bounded_forward_fill(
+        series: pd.Series,
+        fill_limit: int,
+    ) -> tuple[pd.Series, int, int]:
+        """Forward-fill a series without using future observations."""
+        observed_count = int(series.notna().sum())
+        filled = series.ffill(limit=fill_limit)
+        filled_count = max(int(filled.notna().sum()) - observed_count, 0)
+        return filled, observed_count, filled_count
+
+    @staticmethod
+    def coverage_warning(
+        label: str,
+        total_count: int,
+        observed_count: int,
+        filled_count: int,
+        retained_count: int,
+        fill_limit: int,
+    ) -> str:
+        """Format a non-fatal coverage warning for aligned series."""
+        if total_count <= 0:
+            return ""
+        if observed_count == total_count and filled_count == 0 and retained_count == total_count:
+            return ""
+
+        observed_ratio = observed_count / total_count
+        retained_ratio = retained_count / total_count
+        return (
+            f"{label} coverage warning: observed {observed_count}/{total_count} "
+            f"dates ({observed_ratio:.1%}), forward-filled {filled_count} with "
+            f"limit {fill_limit}, retained {retained_count}/{total_count} dates "
+            f"({retained_ratio:.1%}) after residual gaps."
+        )
+
+    @staticmethod
+    def append_warning_once(warnings: List[str], warning: str) -> None:
+        """Append a warning while preserving order."""
+        if warning and warning not in warnings:
+            warnings.append(warning)
 
     @staticmethod
     def timed_stage(timings: dict[str, float], name: str, fn: Callable[[], T]) -> T:
@@ -188,7 +330,11 @@ class PortfolioAnalysisService:
             allow_truncated=True,
         )
         result = self.factor_analyzer.regress_portfolio(portfolio_returns, factors_df)
-        self.attach_data_provenance(result, fetcher)
+        self.attach_data_provenance(
+            result,
+            fetcher,
+            self.coverage_warnings_from_frame(price_df),
+        )
         return result
 
     @staticmethod
@@ -442,10 +588,7 @@ class PortfolioAnalysisService:
                 return self.normalize_benchmark_prices(df, symbol)
 
             raise DataFetcherError(
-                message=(
-                    f"Unable to fetch real China benchmark data for {symbol}. "
-                    + "; ".join(provider_errors)
-                ),
+                message=(f"Unable to fetch real China benchmark data for {symbol}. " + "; ".join(provider_errors)),
                 symbol=symbol,
                 source="benchmark",
             )
@@ -491,7 +634,9 @@ class PortfolioAnalysisService:
             portfolio_index = portfolio_index.tz_localize(None)
         portfolio_index = portfolio_index.normalize()
         if len(portfolio_index) < 2:
-            result.data_warnings.append("Risk comparison series unavailable: portfolio has fewer than two price observations")
+            result.data_warnings.append(
+                "Risk comparison series unavailable: portfolio has fewer than two price observations"
+            )
             return
 
         benchmark_symbol, benchmark_name = BENCHMARKS.get(request.market, BENCHMARKS["us"])
@@ -515,9 +660,22 @@ class PortfolioAnalysisService:
             if len(benchmark_series) < 2:
                 raise ValueError("benchmark has fewer than two valid observations")
 
-            aligned_close = benchmark_series.reindex(portfolio_index).ffill().bfill()
+            aligned_close_raw = benchmark_series.reindex(portfolio_index)
+            aligned_close, observed_count, filled_count = self.bounded_forward_fill(
+                aligned_close_raw,
+                self.PRICE_FORWARD_FILL_LIMIT,
+            )
             aligned_close = aligned_close.replace([np.inf, -np.inf], np.nan).dropna()
             aligned_close = aligned_close[aligned_close > 0.0]
+            coverage_warning = self.coverage_warning(
+                benchmark_name,
+                len(portfolio_index),
+                observed_count,
+                filled_count,
+                len(aligned_close),
+                self.PRICE_FORWARD_FILL_LIMIT,
+            )
+            self.append_warning_once(result.data_warnings, coverage_warning)
             if len(aligned_close) < 2:
                 raise ValueError("benchmark does not overlap the portfolio window")
 
@@ -591,9 +749,25 @@ class PortfolioAnalysisService:
 
             normalized_rates = risk_free_series.where(risk_free_series <= 0.5, risk_free_series / 100.0)
             normalized_rates = normalized_rates.clip(lower=-0.99)
-            aligned_rates = normalized_rates.reindex(portfolio_index).ffill().bfill()
-            aligned_rates = aligned_rates.replace([np.inf, -np.inf], np.nan).dropna()
-            aligned_rates = aligned_rates.reindex(portfolio_index[1:]).dropna()
+            aligned_rates_raw = normalized_rates.reindex(portfolio_index)
+            aligned_rates, observed_count, filled_count = self.bounded_forward_fill(
+                aligned_rates_raw,
+                self.RATE_FORWARD_FILL_LIMIT,
+            )
+            clean_aligned_rates = aligned_rates.replace(
+                [np.inf, -np.inf],
+                np.nan,
+            ).dropna()
+            coverage_warning = self.coverage_warning(
+                RISK_FREE_NAME,
+                len(portfolio_index),
+                observed_count,
+                filled_count,
+                len(clean_aligned_rates),
+                self.RATE_FORWARD_FILL_LIMIT,
+            )
+            self.append_warning_once(result.data_warnings, coverage_warning)
+            aligned_rates = clean_aligned_rates.reindex(portfolio_index[1:]).dropna()
             if aligned_rates.empty:
                 raise ValueError("risk-free series does not overlap the portfolio window")
 
@@ -636,7 +810,12 @@ class PortfolioAnalysisService:
             return float(requested_rate), "request", "Request override", []
         if market == "hk":
             try:
-                return self.fetch_hk_risk_free_rate(fetcher, asof=asof), "hkma", HK_RISK_FREE_SOURCE_DETAIL, []
+                return (
+                    self.fetch_hk_risk_free_rate(fetcher, asof=asof),
+                    "hkma",
+                    HK_RISK_FREE_SOURCE_DETAIL,
+                    [],
+                )
             except Exception as exc:
                 return (
                     DEFAULT_HK_RISK_FREE_RATE,
@@ -646,7 +825,12 @@ class PortfolioAnalysisService:
                 )
         if market == "cn":
             try:
-                return self.fetch_cn_risk_free_rate(asof=asof), "chinabond", CN_RISK_FREE_SOURCE_DETAIL, []
+                return (
+                    self.fetch_cn_risk_free_rate(asof=asof),
+                    "chinabond",
+                    CN_RISK_FREE_SOURCE_DETAIL,
+                    [],
+                )
             except Exception as exc:
                 return (
                     DEFAULT_CN_RISK_FREE_RATE,
@@ -695,11 +879,7 @@ class PortfolioAnalysisService:
         if market == "cn":
             return None
 
-        if (
-            asof is not None
-            and asof < datetime.now().date()
-            and cov_matrix is not None
-        ):
+        if asof is not None and asof < datetime.now().date() and cov_matrix is not None:
             try:
                 cov = np.asarray(cov_matrix, dtype=float)
                 if cov.ndim == 2 and cov.shape[0] == cov.shape[1] == len(tickers):
@@ -740,10 +920,7 @@ class PortfolioAnalysisService:
     ) -> dict:
         """Score OOS performance against the selected benchmark."""
         ir = RiskEngine.compute_information_ratio(strategy_daily, benchmark_daily)
-        excess_return = (
-            metrics["cumulative_returns"][-1]
-            - benchmark_metrics["cumulative_returns"][-1]
-        )
+        excess_return = metrics["cumulative_returns"][-1] - benchmark_metrics["cumulative_returns"][-1]
         score = RiskEngine.calculate_model_score(
             {
                 "sharpe_ratio": metrics["sharpe_ratio"],
@@ -786,14 +963,8 @@ class PortfolioAnalysisService:
 
         raw_cum_return = raw_metrics["cumulative_returns"][-1]
         prior_cum_return = prior_metrics["cumulative_returns"][-1]
-        prior_not_worse = (
-            prior_score >= raw_score - 1.0
-            and prior_cum_return >= raw_cum_return - 0.001
-        )
-        prior_clearly_better = (
-            prior_score >= raw_score + 5.0
-            and prior_cum_return >= raw_cum_return + 0.01
-        )
+        prior_not_worse = prior_score >= raw_score - 1.0 and prior_cum_return >= raw_cum_return - 0.001
+        prior_clearly_better = prior_score >= raw_score + 5.0 and prior_cum_return >= raw_cum_return + 0.01
 
         force_context = (
             anomaly_impact in {"force_oos_guard", "freeze_rebalance"}
@@ -818,11 +989,7 @@ class PortfolioAnalysisService:
             return prior_weights * 0.50 + raw_weights * 0.50, "balanced_blend"
 
         if raw_excess_return is not None:
-            if (
-                raw_excess_return < -0.015
-                and raw_score < 50.0
-                and prior_clearly_better
-            ):
+            if raw_excess_return < -0.015 and raw_score < 50.0 and prior_clearly_better:
                 return prior_weights * 0.40 + raw_weights * 0.60, "defensive_blend"
             if (
                 raw_information_ratio is not None
@@ -855,6 +1022,7 @@ class PortfolioAnalysisService:
                 market_mode=payload.market,
             ),
         )
+        price_coverage_warnings = self.coverage_warnings_from_frame(price_df)
         portfolio_source = fetcher.last_source
         portfolio_source_detail = fetcher.last_source_detail
         alpha_meta = {
@@ -882,17 +1050,12 @@ class PortfolioAnalysisService:
         def build_risk() -> RiskEvaluationResult:
             result = engine.evaluate_from_prices(risk_payload, price_df)
             self.attach_risk_benchmark(result, risk_payload, price_df)
-            self.attach_data_provenance(result, fetcher)
+            self.attach_data_provenance(result, fetcher, price_coverage_warnings)
             return result
 
         def build_alpha() -> Optional[FactorRegressionResult]:
-            if payload.market in {"cn", "jp", "tw"}:
-                alpha_messages = {
-                    "cn": "China A-share factor attribution is not supported yet.",
-                    "jp": "Japan market factor attribution is not supported yet.",
-                    "tw": "Taiwan market factor attribution is not supported yet.",
-                }
-                alpha_message = alpha_messages[payload.market]
+            if payload.market in ALPHA_UNSUPPORTED_MARKET_MESSAGES:
+                alpha_message = ALPHA_UNSUPPORTED_MARKET_MESSAGES[payload.market]
                 alpha_meta.update(
                     {
                         "status": "unavailable",
@@ -948,7 +1111,7 @@ class PortfolioAnalysisService:
                     weights=payload.weights,
                     source=portfolio_source,
                 )
-                self.attach_data_provenance(result, fetcher)
+                self.attach_data_provenance(result, fetcher, price_coverage_warnings)
                 return result
             except ValueError:
                 return None
@@ -962,7 +1125,7 @@ class PortfolioAnalysisService:
                     model_type=payload.regime_model_type,
                     source=portfolio_source,
                 )
-                self.attach_data_provenance(result, fetcher)
+                self.attach_data_provenance(result, fetcher, price_coverage_warnings)
                 return result
             except ValueError:
                 return None
@@ -977,7 +1140,7 @@ class PortfolioAnalysisService:
                     confidence_level=payload.ml_confidence_level,
                     source=portfolio_source,
                 )
-                self.attach_data_provenance(result, fetcher)
+                self.attach_data_provenance(result, fetcher, price_coverage_warnings)
                 return result
             except ValueError:
                 return None
@@ -986,15 +1149,17 @@ class PortfolioAnalysisService:
             if not payload.crisis_enabled:
                 return None
             try:
-                return self.crisis_warning_service.evaluate_from_prices(
+                result = self.crisis_warning_service.evaluate_from_prices(
                     tickers=payload.tickers,
                     price_df=price_df,
                     weights=payload.weights,
                     horizon=payload.crisis_horizon,
                     source=portfolio_source,
                     source_detail=portfolio_source_detail,
-                    data_warnings=list(fetcher.data_warnings),
+                    data_warnings=list(dict.fromkeys([*fetcher.data_warnings, *price_coverage_warnings])),
                 )
+                result.data_quality = self.data_quality_from_fetcher(fetcher, price_coverage_warnings)
+                return result
             except CrisisWarningUnavailableError as exc:
                 self.logger.error(
                     "crisis warning unavailable tickers=%s horizon=%s error=%s",
@@ -1013,7 +1178,14 @@ class PortfolioAnalysisService:
                 raise
 
         if self.parallel_analysis_enabled():
-            risk_result, alpha_result, anomaly_result, regime_result, ml_result, crisis_result = await asyncio.gather(
+            (
+                risk_result,
+                alpha_result,
+                anomaly_result,
+                regime_result,
+                ml_result,
+                crisis_result,
+            ) = await asyncio.gather(
                 asyncio.to_thread(self.timed_stage, timings, "risk", build_risk),
                 asyncio.to_thread(self.timed_stage, timings, "alpha", build_alpha),
                 asyncio.to_thread(self.timed_stage, timings, "anomaly", build_anomaly),
@@ -1060,9 +1232,9 @@ class PortfolioAnalysisService:
                 price_df,
                 portfolio_source=portfolio_source,
                 portfolio_source_detail=portfolio_source_detail,
-                ml_result=ml_result,
-                regime_result=regime_result,
-                anomaly_result=anomaly_result,
+                ml_result=None if payload.backtest_enabled else ml_result,
+                regime_result=None if payload.backtest_enabled else regime_result,
+                anomaly_result=None if payload.backtest_enabled else anomaly_result,
             ),
         )
         timings["total"] = round(time.perf_counter() - analysis_started, 4)
@@ -1073,6 +1245,19 @@ class PortfolioAnalysisService:
             payload.end_date.isoformat(),
             timings,
         )
+
+        analysis_warnings: list[str] = []
+        for result in (
+            risk_result,
+            alpha_result,
+            optimization_result,
+            anomaly_result,
+            regime_result,
+            ml_result,
+            crisis_result,
+        ):
+            if result is not None:
+                analysis_warnings.extend(list(getattr(result, "data_warnings", []) or []))
 
         return AnalysisRunResult(
             risk=risk_result,
@@ -1087,6 +1272,7 @@ class PortfolioAnalysisService:
             regime=regime_result,
             ml_forecast=ml_result,
             crisis_warning=crisis_result,
+            data_quality=self.data_quality_from_fetcher(fetcher, analysis_warnings),
         )
 
     @staticmethod
@@ -1215,7 +1401,9 @@ class PortfolioAnalysisService:
             "none": cls._localized_text(language, "None", "无", "無"),
             "tighten_constraints": cls._localized_text(language, "Tighten constraints", "收紧约束", "收緊約束"),
             "freeze_rebalance": cls._localized_text(language, "Freeze rebalance", "冻结调仓", "凍結調倉"),
-            "force_oos_guard": cls._localized_text(language, "Force OOS guard", "强制启用样本外防守", "強制啟用樣本外防守"),
+            "force_oos_guard": cls._localized_text(
+                language, "Force OOS guard", "强制启用样本外防守", "強制啟用樣本外防守"
+            ),
         }
         if not normalized:
             return cls._localized_na(language)
@@ -1253,13 +1441,42 @@ class PortfolioAnalysisService:
         raw = (value or "").strip()
         normalized = raw.lower()
         labels = {
-            "rolling_volatility_20d": cls._localized_text(language, "20-day rolling volatility", "20 日滚动波动率", "20 日滾動波動率"),
-            "correlation_mean_20d": cls._localized_text(language, "20-day average correlation", "20 日平均相关性", "20 日平均相關性"),
-            "rolling_mean_return_20d": cls._localized_text(language, "20-day rolling average return", "20 日滚动平均收益", "20 日滾動平均收益"),
-            "rolling_max_drawdown_60d": cls._localized_text(language, "60-day rolling max drawdown", "60 日滚动最大回撤", "60 日滾動最大回撤"),
-            "downside_volatility_20d": cls._localized_text(language, "20-day downside volatility", "20 日下行波动率", "20 日下行波動率"),
-            "portfolio_return_1d": cls._localized_text(language, "1-day portfolio return", "组合单日收益", "組合單日收益"),
-            "portfolio_return_5d": cls._localized_text(language, "5-day portfolio return", "组合 5 日收益", "組合 5 日收益"),
+            "rolling_volatility_20d": cls._localized_text(
+                language,
+                "20-day rolling volatility",
+                "20 日滚动波动率",
+                "20 日滾動波動率",
+            ),
+            "correlation_mean_20d": cls._localized_text(
+                language,
+                "20-day average correlation",
+                "20 日平均相关性",
+                "20 日平均相關性",
+            ),
+            "rolling_mean_return_20d": cls._localized_text(
+                language,
+                "20-day rolling average return",
+                "20 日滚动平均收益",
+                "20 日滾動平均收益",
+            ),
+            "rolling_max_drawdown_60d": cls._localized_text(
+                language,
+                "60-day rolling max drawdown",
+                "60 日滚动最大回撤",
+                "60 日滾動最大回撤",
+            ),
+            "downside_volatility_20d": cls._localized_text(
+                language,
+                "20-day downside volatility",
+                "20 日下行波动率",
+                "20 日下行波動率",
+            ),
+            "portfolio_return_1d": cls._localized_text(
+                language, "1-day portfolio return", "组合单日收益", "組合單日收益"
+            ),
+            "portfolio_return_5d": cls._localized_text(
+                language, "5-day portfolio return", "组合 5 日收益", "組合 5 日收益"
+            ),
             "volatility_20d": cls._localized_text(language, "20-day volatility", "20 日波动率", "20 日波動率"),
             "max_drawdown_60d": cls._localized_text(language, "60-day max drawdown", "60 日最大回撤", "60 日最大回撤"),
             "correlation_stress": cls._localized_text(language, "Correlation stress", "相关性压力", "相關性壓力"),
@@ -1326,6 +1543,12 @@ class PortfolioAnalysisService:
         if not raw:
             return cls._localized_na(language)
         known = {
+            "Hong Kong market factor attribution is disabled because HK-local factors are not configured.": cls._localized_text(
+                language,
+                "Hong Kong market factor attribution is disabled because HK-local factors are not configured.",
+                "港股因子归因已关闭，因为当前未接入港股本土因子。",
+                "港股因子歸因已關閉，因為目前未接入港股本土因子。",
+            ),
             "China A-share factor attribution is not supported yet.": cls._localized_text(
                 language,
                 "China A-share factor attribution is not supported yet.",
@@ -1472,9 +1695,7 @@ class PortfolioAnalysisService:
         regime_text = cls._localized_regime(regime_report.current_regime, language) if regime_report else missing
         anomaly_text = cls._localized_level(anomaly_report.alert_level, language) if anomaly_report else missing
         crisis_text = (
-            cls._format_report_percent(crisis_report.crisis_probability, missing=missing)
-            if crisis_report
-            else missing
+            cls._format_report_percent(crisis_report.crisis_probability, missing=missing) if crisis_report else missing
         )
         oos_excess = cls._format_report_percent(decision_summary.oos_excess_return, signed=True, missing=missing)
         model_score = (
@@ -1573,8 +1794,7 @@ class PortfolioAnalysisService:
 
         if key == "portfolio_overview":
             weights_text = ", ".join(
-                f"{ticker} {weight * 100.0:.1f}%"
-                for ticker, weight in zip(overview.tickers, overview.weights)
+                f"{ticker} {weight * 100.0:.1f}%" for ticker, weight in zip(overview.tickers, overview.weights)
             )
             return cls._localized_text(
                 language,
@@ -1603,7 +1823,10 @@ class PortfolioAnalysisService:
             )
         if key == "ml_forecast" and ml is not None:
             feature_separator = ", " if language == "en" else "、"
-            features = feature_separator.join(cls._localized_feature(feature, language) for feature in ml.top_features[:3]) or missing
+            features = (
+                feature_separator.join(cls._localized_feature(feature, language) for feature in ml.top_features[:3])
+                or missing
+            )
             ml_level = cls._localized_level(ml.risk_level, language)
             return cls._localized_text(
                 language,
@@ -1612,7 +1835,9 @@ class PortfolioAnalysisService:
                 f"機器學習層將下行風險識別為 {ml_level}，主要解釋特徵包括 {features}。該結果應視為模型化風險疊加訊號，而不是收益預測。",
             )
         if key == "anomaly" and anomaly is not None:
-            reasons = "；".join(cls._localized_reason(reason, language) for reason in anomaly.main_reasons[:3]) or missing
+            reasons = (
+                "；".join(cls._localized_reason(reason, language) for reason in anomaly.main_reasons[:3]) or missing
+            )
             alert_level = cls._localized_level(anomaly.alert_level, language)
             decision_impact = cls._localized_decision_impact(anomaly.decision_impact, language)
             return cls._localized_text(
@@ -1632,7 +1857,11 @@ class PortfolioAnalysisService:
                 f"市場狀態識別將組合歸入 {current_regime}，最高狀態概率為 {dominant}。建議壓力等級為 {stress_level}。",
             )
         if key == "crisis_warning" and crisis is not None:
-            driver = cls._localized_feature(crisis.top_risk_drivers[0].feature, language) if crisis.top_risk_drivers else missing
+            driver = (
+                cls._localized_feature(crisis.top_risk_drivers[0].feature, language)
+                if crisis.top_risk_drivers
+                else missing
+            )
             warning_level = cls._localized_level(crisis.warning_level, language)
             model_health = cls._localized_model_health(crisis.model_health, language)
             return cls._localized_text(
@@ -1750,9 +1979,15 @@ class PortfolioAnalysisService:
             notes.append(
                 RiskReportMethodologyNote(
                     code="ALPHA_UNAVAILABLE",
-                    title=cls._localized_text(language, "Alpha attribution unavailable", "Alpha 归因不可用", "Alpha 歸因不可用"),
+                    title=cls._localized_text(
+                        language,
+                        "Alpha attribution unavailable",
+                        "Alpha 归因不可用",
+                        "Alpha 歸因不可用",
+                    ),
                     detail=cls._localized_warning_text(
-                        analysis.alpha_message or "Alpha attribution is unavailable for the selected market or sample window.",
+                        analysis.alpha_message
+                        or "Alpha attribution is unavailable for the selected market or sample window.",
                         language,
                     ),
                     severity="warning",
@@ -1774,7 +2009,12 @@ class PortfolioAnalysisService:
                     ),
                     RiskReportMethodologyNote(
                         code="CN_BENCHMARK",
-                        title=cls._localized_text(language, "CSI300 benchmark", "沪深 300 基准", "滬深 300 基準"),
+                        title=cls._localized_text(
+                            language,
+                            "CSI300 benchmark",
+                            "沪深 300 基准",
+                            "滬深 300 基準",
+                        ),
                         detail=cls._localized_text(
                             language,
                             "CN out-of-sample benchmark uses CSI300 (000300).",
@@ -1816,7 +2056,12 @@ class PortfolioAnalysisService:
                     ),
                     RiskReportMethodologyNote(
                         code="JP_BENCHMARK",
-                        title=cls._localized_text(language, "Nikkei 225 benchmark", "日经 225 基准", "日經 225 基準"),
+                        title=cls._localized_text(
+                            language,
+                            "Nikkei 225 benchmark",
+                            "日经 225 基准",
+                            "日經 225 基準",
+                        ),
                         detail=cls._localized_text(
                             language,
                             "JP out-of-sample benchmark uses Nikkei 225 (^N225).",
@@ -1858,7 +2103,12 @@ class PortfolioAnalysisService:
                     ),
                     RiskReportMethodologyNote(
                         code="TW_BENCHMARK",
-                        title=cls._localized_text(language, "TAIEX benchmark", "台湾加权指数基准", "台灣加權指數基準"),
+                        title=cls._localized_text(
+                            language,
+                            "TAIEX benchmark",
+                            "台湾加权指数基准",
+                            "台灣加權指數基準",
+                        ),
                         detail=cls._localized_text(
                             language,
                             "TW out-of-sample benchmark uses TAIEX (^TWII).",
@@ -1969,9 +2219,23 @@ class PortfolioAnalysisService:
                 summary=cls._section_summary(report, "portfolio_overview"),
                 included=is_included("portfolio_overview"),
                 metrics=[
-                    RiskReportMetric(key="market", label=title("Market", "市场", "市場"), value=report.portfolio_overview.market),
-                    RiskReportMetric(key="capital", label=title("Capital", "资本", "資本"), value=report.portfolio_overview.capital, unit=report.portfolio_overview.currency),
-                    RiskReportMetric(key="leverage", label=title("Leverage", "杠杆", "槓桿"), value=report.portfolio_overview.leverage, unit="x"),
+                    RiskReportMetric(
+                        key="market",
+                        label=title("Market", "市场", "市場"),
+                        value=report.portfolio_overview.market,
+                    ),
+                    RiskReportMetric(
+                        key="capital",
+                        label=title("Capital", "资本", "資本"),
+                        value=report.portfolio_overview.capital,
+                        unit=report.portfolio_overview.currency,
+                    ),
+                    RiskReportMetric(
+                        key="leverage",
+                        label=title("Leverage", "杠杆", "槓桿"),
+                        value=report.portfolio_overview.leverage,
+                        unit="x",
+                    ),
                 ],
             ),
             RiskReportSection(
@@ -1980,11 +2244,31 @@ class PortfolioAnalysisService:
                 summary=cls._section_summary(report, "executive_risk_summary"),
                 included=is_included("executive_risk_summary"),
                 metrics=[
-                    RiskReportMetric(key="historical_es", label=title("Historical ES", "历史 ES", "歷史 ES"), value=report.traditional_risk.historical_es),
-                    RiskReportMetric(key="monte_carlo_es", label=title("Monte Carlo ES", "蒙特卡洛 ES", "蒙地卡羅 ES"), value=report.traditional_risk.monte_carlo_es),
-                    RiskReportMetric(key="ml_risk_level", label=title("ML risk level", "ML 风险等级", "ML 風險等級"), value=report.ml_forecast.risk_level if report.ml_forecast else None),
-                    RiskReportMetric(key="crisis_probability", label=title("Crisis probability", "危机概率", "危機概率"), value=report.crisis_warning.crisis_probability if report.crisis_warning else None),
-                    RiskReportMetric(key="model_score", label=title("Model score", "模型评分", "模型評分"), value=report.decision_summary.model_score),
+                    RiskReportMetric(
+                        key="historical_es",
+                        label=title("Historical ES", "历史 ES", "歷史 ES"),
+                        value=report.traditional_risk.historical_es,
+                    ),
+                    RiskReportMetric(
+                        key="monte_carlo_es",
+                        label=title("Monte Carlo ES", "蒙特卡洛 ES", "蒙地卡羅 ES"),
+                        value=report.traditional_risk.monte_carlo_es,
+                    ),
+                    RiskReportMetric(
+                        key="ml_risk_level",
+                        label=title("ML risk level", "ML 风险等级", "ML 風險等級"),
+                        value=(report.ml_forecast.risk_level if report.ml_forecast else None),
+                    ),
+                    RiskReportMetric(
+                        key="crisis_probability",
+                        label=title("Crisis probability", "危机概率", "危機概率"),
+                        value=(report.crisis_warning.crisis_probability if report.crisis_warning else None),
+                    ),
+                    RiskReportMetric(
+                        key="model_score",
+                        label=title("Model score", "模型评分", "模型評分"),
+                        value=report.decision_summary.model_score,
+                    ),
                 ],
             ),
             RiskReportSection(
@@ -1998,36 +2282,68 @@ class PortfolioAnalysisService:
                 title=title("ML Risk Forecast", "ML 风险预测", "ML 風險預測"),
                 summary=cls._section_summary(report, "ml_forecast"),
                 included=is_included("ml_forecast") and report.ml_forecast is not None,
-                warnings=[] if report.ml_forecast else [
-                    title("ML forecast is unavailable.", "机器学习预测不可用。", "機器學習預測不可用。")
-                ],
+                warnings=(
+                    []
+                    if report.ml_forecast
+                    else [
+                        title(
+                            "ML forecast is unavailable.",
+                            "机器学习预测不可用。",
+                            "機器學習預測不可用。",
+                        )
+                    ]
+                ),
             ),
             RiskReportSection(
                 key="anomaly",
                 title=title("Anomaly Detection", "异常检测", "異常偵測"),
                 summary=cls._section_summary(report, "anomaly"),
                 included=is_included("anomaly") and report.anomaly is not None,
-                warnings=[] if report.anomaly else [
-                    title("Anomaly detection is unavailable.", "异常检测不可用。", "異常偵測不可用。")
-                ],
+                warnings=(
+                    []
+                    if report.anomaly
+                    else [
+                        title(
+                            "Anomaly detection is unavailable.",
+                            "异常检测不可用。",
+                            "異常偵測不可用。",
+                        )
+                    ]
+                ),
             ),
             RiskReportSection(
                 key="regime",
                 title=title("Market Regime", "市场状态", "市場狀態"),
                 summary=cls._section_summary(report, "regime"),
                 included=is_included("regime") and report.regime is not None,
-                warnings=[] if report.regime else [
-                    title("Market regime detection is unavailable.", "市场状态识别不可用。", "市場狀態識別不可用。")
-                ],
+                warnings=(
+                    []
+                    if report.regime
+                    else [
+                        title(
+                            "Market regime detection is unavailable.",
+                            "市场状态识别不可用。",
+                            "市場狀態識別不可用。",
+                        )
+                    ]
+                ),
             ),
             RiskReportSection(
                 key="crisis_warning",
                 title=title("Explainable Crisis Warning", "可解释危机预警", "可解釋危機預警"),
                 summary=cls._section_summary(report, "crisis_warning"),
                 included=is_included("crisis_warning") and report.crisis_warning is not None,
-                warnings=[] if report.crisis_warning else [
-                    title("Crisis warning is unavailable.", "危机预警不可用。", "危機預警不可用。")
-                ],
+                warnings=(
+                    []
+                    if report.crisis_warning
+                    else [
+                        title(
+                            "Crisis warning is unavailable.",
+                            "危机预警不可用。",
+                            "危機預警不可用。",
+                        )
+                    ]
+                ),
             ),
             RiskReportSection(
                 key="decision_summary",
@@ -2122,12 +2438,10 @@ class PortfolioAnalysisService:
                 model_health=crisis_diagnostics.model_health,
                 calibration_state=calibration_state,
                 top_risk_drivers=[
-                    cls._crisis_driver(driver)
-                    for driver in list(analysis.crisis_warning.top_risk_drivers or [])
+                    cls._crisis_driver(driver) for driver in list(analysis.crisis_warning.top_risk_drivers or [])
                 ],
                 risk_reducers=[
-                    cls._crisis_driver(driver)
-                    for driver in list(analysis.crisis_warning.risk_reducers or [])
+                    cls._crisis_driver(driver) for driver in list(analysis.crisis_warning.risk_reducers or [])
                 ],
             )
 
@@ -2172,6 +2486,7 @@ class PortfolioAnalysisService:
             methodology_notes=[],
             disclaimers=cls._report_disclaimers(payload.language),
             data_warnings=data_warnings,
+            data_quality=cls.data_quality_from_result(analysis, data_warnings),
         )
         report.methodology_notes = cls._build_methodology_notes(payload, analysis, data_warnings)
         report.sections = cls._report_sections(payload, report)
@@ -2206,6 +2521,8 @@ class PortfolioAnalysisService:
         """Build an optimization result from aligned price data."""
         portfolio_source = portfolio_source or fetcher.last_source
         portfolio_source_detail = portfolio_source_detail or fetcher.last_source_detail
+        price_coverage_warnings = self.coverage_warnings_from_frame(price_df)
+        portfolio_data_quality = self.data_quality_from_fetcher(fetcher, price_coverage_warnings)
         returns_df = RiskEngine.compute_log_returns(price_df)
 
         n_assets = len(payload.tickers)
@@ -2214,21 +2531,25 @@ class PortfolioAnalysisService:
             train_df, test_df = RiskEngine.split_returns(returns_df, payload.test_ratio)
             asof = train_df.index[-1].date()
             initial_prior_returns, initial_cov_matrix = RiskEngine.prepare_optimization_inputs(
-                train_df, n_assets,
+                train_df,
+                n_assets,
             )
         else:
             asof = None
             train_df = None
             test_df = None
             initial_prior_returns, initial_cov_matrix = RiskEngine.prepare_optimization_inputs(
-                returns_df, n_assets,
+                returns_df,
+                n_assets,
             )
 
         policy_price_df = price_df
         policy_asof: str | None = None
         if train_df is not None:
-            policy_price_df = price_df.loc[:train_df.index[-1]]
+            policy_price_df = price_df.loc[: train_df.index[-1]]
             policy_asof = train_df.index[-1].strftime("%Y-%m-%d")
+        elif not price_df.empty:
+            policy_asof = pd.Timestamp(price_df.index[-1]).date().isoformat()
         allocation_policy = self.allocation_policy_engine.resolve_from_prices(
             tickers=payload.tickers,
             price_df=policy_price_df,
@@ -2242,6 +2563,7 @@ class PortfolioAnalysisService:
             ml_result=ml_result,
             regime_result=regime_result,
             anomaly_result=anomaly_result,
+            oos_leakage_guard=payload.backtest_enabled,
         )
         max_weight = allocation_policy.max_weight
         min_weight = allocation_policy.min_weight
@@ -2309,13 +2631,16 @@ class PortfolioAnalysisService:
                 n_observations=len(returns_df),
             )
             result.allocation_policy = allocation_policy
+            result.policy_asof = allocation_policy.policy_asof
+            result.oos_leakage_guard = allocation_policy.oos_leakage_guard
             result.risk_free_rate = risk_free_rate
             result.risk_free_rate_source = risk_free_rate_source
             result.risk_free_rate_source_detail = risk_free_rate_source_detail
             result.methodology_warnings = methodology_warnings
-            self.attach_data_provenance(result, fetcher)
+            self.attach_data_provenance(result, fetcher, price_coverage_warnings)
             result.source = portfolio_source
             result.source_detail = portfolio_source_detail
+            result.data_quality = portfolio_data_quality.with_warnings(result.data_warnings)
             return result
 
         benchmark_symbol, benchmark_name = BENCHMARKS.get(payload.market, BENCHMARKS["us"])
@@ -2335,7 +2660,23 @@ class PortfolioAnalysisService:
 
         common_idx = test_df.index.intersection(bench_returns.index)
         if len(common_idx) < 5:
-            bench_aligned = bench_returns.reindex(test_df.index, method="ffill").dropna()
+            bench_raw = bench_returns.reindex(test_df.index)
+            bench_filled, observed_count, filled_count = self.bounded_forward_fill(
+                bench_raw,
+                self.PRICE_FORWARD_FILL_LIMIT,
+            )
+            bench_aligned = bench_filled.dropna()
+            self.append_warning_once(
+                methodology_warnings,
+                self.coverage_warning(
+                    f"{benchmark_name} OOS benchmark",
+                    len(test_df.index),
+                    observed_count,
+                    filled_count,
+                    len(bench_aligned),
+                    self.PRICE_FORWARD_FILL_LIMIT,
+                ),
+            )
             common_idx = bench_aligned.index
             bench_returns_aligned = bench_aligned
         else:
@@ -2350,11 +2691,10 @@ class PortfolioAnalysisService:
         last_sub_result: Optional[OptimizationResult] = None
         cursor = 0
         while cursor < len(test_df):
-            rolling_train = pd.concat(
-                [train_df, test_df.iloc[:cursor]]
-            ).tail(max(252, len(train_df)))
+            rolling_train = pd.concat([train_df, test_df.iloc[:cursor]]).tail(max(252, len(train_df)))
             roll_pi, roll_cov = RiskEngine.prepare_optimization_inputs(
-                rolling_train, n_assets,
+                rolling_train,
+                n_assets,
             )
             roll_asof = rolling_train.index[-1].date()
             roll_caps: Optional[List[float]] = None
@@ -2381,7 +2721,7 @@ class PortfolioAnalysisService:
                 n_observations=len(rolling_train),
             )
 
-            seg = test_df.iloc[cursor:cursor + rebalance_days]
+            seg = test_df.iloc[cursor : cursor + rebalance_days]
             seg_prior_w = np.asarray(sub_result.prior_weights, dtype=float)
             seg_raw_w = np.asarray(sub_result.raw_posterior_weights, dtype=float)
             chunks_prior.append(seg.to_numpy() @ seg_prior_w)
@@ -2417,10 +2757,16 @@ class PortfolioAnalysisService:
         )
 
         prior_scored = self.score_oos_metrics(
-            prior_metrics, prior_daily, benchmark_daily, bench_metrics,
+            prior_metrics,
+            prior_daily,
+            benchmark_daily,
+            bench_metrics,
         )
         raw_scored = self.score_oos_metrics(
-            raw_metrics, raw_daily, benchmark_daily, bench_metrics,
+            raw_metrics,
+            raw_daily,
+            benchmark_daily,
+            bench_metrics,
         )
         raw_score = raw_scored["score"]["total_score"]
         prior_score = prior_scored["score"]["total_score"]
@@ -2454,7 +2800,10 @@ class PortfolioAnalysisService:
             risk_free_rate=risk_free_rate,
         )
         opt_scored = self.score_oos_metrics(
-            opt_metrics, strategy_daily, benchmark_daily, bench_metrics,
+            opt_metrics,
+            strategy_daily,
+            benchmark_daily,
+            bench_metrics,
         )
         oos_warnings: List[str] = []
         if opt_scored["excess_return"] < 0.0:
@@ -2467,6 +2816,8 @@ class PortfolioAnalysisService:
         result.recommended_weights = decision_weights.tolist()
         result.decision_policy = decision_policy
         result.allocation_policy = allocation_policy
+        result.policy_asof = allocation_policy.policy_asof
+        result.oos_leakage_guard = allocation_policy.oos_leakage_guard
         result.turnover = float(np.abs(decision_weights - prior_weights).sum())
         result.backtest_enabled = True
         result.benchmark_symbol = benchmark_symbol
@@ -2502,8 +2853,13 @@ class PortfolioAnalysisService:
         result.model_score_stability = score_result["stability"]
         result.model_score_win_rate = score_result["win_rate"]
 
-        self.attach_data_provenance(result, fetcher)
+        self.attach_data_provenance(result, fetcher, price_coverage_warnings)
         result.source = portfolio_source
         result.source_detail = portfolio_source_detail
-        result.data_warnings = [*result.data_warnings, *methodology_warnings, *oos_warnings]
+        result.data_warnings = [
+            *result.data_warnings,
+            *methodology_warnings,
+            *oos_warnings,
+        ]
+        result.data_quality = portfolio_data_quality.with_warnings(result.data_warnings)
         return result

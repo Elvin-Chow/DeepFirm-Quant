@@ -198,7 +198,7 @@ class FetcherCacheTests(unittest.TestCase):
 
         self.assertNotEqual(fetcher.last_source, "sandbox")
 
-    def test_yfinance_rate_limit_reuses_complete_cache_without_stale_warning(self) -> None:
+    def test_yfinance_rate_limit_reuses_complete_stale_cache_with_quality_status(self) -> None:
         prices = pd.DataFrame(
             {
                 "Date": pd.date_range("2026-01-01", periods=22, freq="B"),
@@ -226,8 +226,12 @@ class FetcherCacheTests(unittest.TestCase):
                         date(2026, 1, 31),
                     )
 
-        self.assertEqual(fetcher.last_source, "cache")
-        self.assertNotIn("cached prices", " ".join(fetcher.data_warnings))
+        self.assertEqual(fetcher.last_source, "stale_cache")
+        self.assertEqual(fetcher.last_data_quality.cache_status, "stale_cache")
+        self.assertTrue(fetcher.last_data_quality.is_stale)
+        self.assertFalse(fetcher.last_data_quality.is_partial)
+        self.assertIn("yfinance", fetcher.last_data_quality.provider_chain)
+        self.assertIn("cached prices", " ".join(fetcher.data_warnings))
         self.assertGreaterEqual(response.records, 20)
 
     def test_complete_cache_requires_recent_end_coverage(self) -> None:
@@ -294,6 +298,10 @@ class FetcherCacheTests(unittest.TestCase):
 
         self.assertIsNone(cached)
         self.assertIsNotNone(stale_cached)
+        assert stale_cached is not None
+        self.assertFalse(stale_cached.is_stale)
+        self.assertTrue(stale_cached.is_partial)
+        self.assertEqual(stale_cached.provider, "yahoo_chart")
 
     def test_incomplete_symbol_cache_falls_through_to_exact_window_cache(self) -> None:
         short_prices = pd.DataFrame(
@@ -403,6 +411,10 @@ class FetcherCacheTests(unittest.TestCase):
                     )
 
         self.assertEqual(fetcher.last_source, "stale_cache")
+        self.assertEqual(fetcher.last_data_quality.cache_status, "stale_partial")
+        self.assertTrue(fetcher.last_data_quality.is_stale)
+        self.assertTrue(fetcher.last_data_quality.is_partial)
+        self.assertIn("yfinance", fetcher.last_data_quality.provider_chain)
         self.assertIn("cached prices", " ".join(fetcher.data_warnings))
         self.assertGreaterEqual(response.records, 13)
 

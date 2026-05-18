@@ -9,7 +9,7 @@ import pandas as pd
 import requests
 
 from backend import main as api
-from backend.services import PortfolioAnalysisService
+from backend.services import ALPHA_UNSUPPORTED_MARKET_MESSAGES, PortfolioAnalysisService
 from data_pipeline.fetcher import SmartFetcher
 from models import OptimizationResult, RiskEvaluationResult
 
@@ -287,6 +287,74 @@ class ChinaAnalysisWorkflowTests(unittest.TestCase):
         self.assertIn("CSI 300 fallback", fetcher.last_source_detail)
         self.assertTrue(any("AKShare benchmark" in warning for warning in fetcher.data_warnings))
         self.assertEqual(list(prices.columns), ["Date", "Close"])
+
+    def test_hk_full_analysis_marks_alpha_unavailable_without_factor_call(self) -> None:
+        dates = pd.date_range("2026-01-05", periods=90, freq="B")
+        price_df = pd.DataFrame(
+            {"0005.HK": 100.0 * np.exp(np.linspace(0.0, 0.12, len(dates)))},
+            index=dates,
+        )
+        risk_result = RiskEvaluationResult(
+            tickers=["0005.HK"],
+            historical_es=0.01,
+            monte_carlo_es=0.012,
+            confidence_level=0.99,
+            source="yahoo_chart",
+            source_detail="Yahoo Finance chart API",
+        )
+        optimization_result = OptimizationResult(
+            tickers=["0005.HK"],
+            prior_returns=[0.1],
+            prior_weights=[1.0],
+            posterior_returns=[0.1],
+            posterior_weights=[1.0],
+            risk_aversion=2.5,
+        )
+        payload = api.AnalysisRunRequest(
+            tickers=["0005.HK"],
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 6, 30),
+            weights=[1.0],
+            market="hk",
+            risk_free_rate=0.0,
+            use_market_cap_prior=False,
+        )
+
+        def fetch_prices_once(engine, tickers, start_date, end_date, market_mode):
+            engine.fetcher._mark_source("yahoo_chart", "Yahoo Finance chart API")
+            return price_df
+
+        with patch.object(api.RiskEngine, "_fetch_prices", autospec=True, side_effect=fetch_prices_once):
+            with patch.object(api.RiskEngine, "evaluate_from_prices", return_value=risk_result):
+                with patch.object(api.analysis_service, "run_alpha_from_prices") as run_alpha:
+                    with patch.object(api.RiskAnomalyDetector, "evaluate_from_prices", side_effect=ValueError("short sample")):
+                        with patch.object(api.MarketRegimeDetector, "evaluate_from_prices", side_effect=ValueError("short sample")):
+                            with patch.object(api.MLRiskEngine, "evaluate_from_prices", side_effect=ValueError("short sample")):
+                                with patch.object(api.analysis_service, "optimize_portfolio_from_prices", return_value=optimization_result):
+                                    result = asyncio.run(api.run_analysis(payload))
+
+        run_alpha.assert_not_called()
+        self.assertIsNone(result.alpha)
+        self.assertEqual(result.alpha_status, "unavailable")
+        self.assertEqual(
+            result.alpha_message,
+            ALPHA_UNSUPPORTED_MARKET_MESSAGES["hk"],
+        )
+        self.assertEqual(result.optimization.tickers, ["0005.HK"])
+
+    def test_hk_alpha_endpoint_rejects_non_local_factor_attribution(self) -> None:
+        payload = api.AlphaAnalysisRequest(
+            tickers=["0005.HK"],
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 6, 30),
+            market="hk",
+        )
+
+        with self.assertRaises(api.HTTPException) as context:
+            asyncio.run(api.fama_french_alpha(payload))
+
+        self.assertEqual(context.exception.status_code, 400)
+        self.assertEqual(context.exception.detail, ALPHA_UNSUPPORTED_MARKET_MESSAGES["hk"])
 
     def test_cn_full_analysis_marks_alpha_unavailable_without_factor_call(self) -> None:
         price_df = make_price_frame(rows=90)[["600519"]]

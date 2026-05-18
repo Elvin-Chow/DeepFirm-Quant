@@ -8,6 +8,7 @@ import logging
 import os
 import threading
 from typing import Optional
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,13 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from backend.cors import configured_origin_regex, configured_origins
+from backend.error_handling import (
+    INTERNAL_ERROR_DETAIL,
+    REQUEST_ID_HEADER,
+    install_error_handlers,
+    request_id_middleware,
+)
+from backend.request_controls import request_controls_middleware
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +49,20 @@ def _load_backend_app() -> ASGIApp:
     return _backend_app
 
 
+def _request_id_from_scope(scope: Scope) -> str:
+    state = scope.get("state")
+    if isinstance(state, dict):
+        request_id = state.get("request_id")
+        if request_id:
+            return str(request_id)
+    for key, value in scope.get("headers") or []:
+        if key.decode("latin1").lower() == REQUEST_ID_HEADER.lower():
+            request_id = value.decode("latin1").strip()
+            if request_id:
+                return request_id
+    return uuid4().hex
+
+
 class LazyBackendApp:
     """Load the full analytics API only when an analytics route is requested."""
 
@@ -57,22 +79,27 @@ class LazyBackendApp:
             )
         except asyncio.TimeoutError:
             logger.exception("full backend startup timed out")
+            request_id = _request_id_from_scope(scope)
             response = JSONResponse(
                 {
                     "detail": (
                         "Backend startup timed out. Please retry shortly while analytics "
                         "dependencies finish loading."
-                    )
+                    ),
+                    "request_id": request_id,
                 },
                 status_code=504,
+                headers={REQUEST_ID_HEADER: request_id},
             )
             await response(scope, receive, send)
             return
         except Exception as exc:
             logger.exception("full backend startup failed")
+            request_id = _request_id_from_scope(scope)
             response = JSONResponse(
-                {"detail": f"Backend startup failed: {exc}"},
+                {"detail": INTERNAL_ERROR_DETAIL, "request_id": request_id},
                 status_code=500,
+                headers={REQUEST_ID_HEADER: request_id},
             )
             await response(scope, receive, send)
             return
@@ -82,8 +109,11 @@ class LazyBackendApp:
 app = FastAPI(
     title="DeepFirm Quant",
     description="Industrial-grade quant risk and decision engine",
-    version="4.1.0",
+    version="5.0.0",
 )
+app.middleware("http")(request_id_middleware)
+app.middleware("http")(request_controls_middleware)
+install_error_handlers(app, logger)
 
 app.add_middleware(
     CORSMiddleware,

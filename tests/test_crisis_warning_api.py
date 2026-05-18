@@ -50,6 +50,14 @@ def make_crisis_result() -> CrisisWarningResult:
         explanation="Test crisis warning.",
         diagnostics=CrisisWarningDiagnostics(
             model_health="ok",
+            training_market_scope=["us", "hk", "cn", "jp", "tw"],
+            required_market_scope=["us", "hk", "cn", "jp", "tw"],
+            covered_market_scope=["us", "hk", "cn", "jp", "tw"],
+            skipped_market_scope=[],
+            is_global_complete=True,
+            artifact_hash="a" * 64,
+            feature_schema_hash="b" * 64,
+            validation_status="ok",
             probability_calibrated=False,
             shap_fallback_used=False,
         ),
@@ -73,6 +81,24 @@ class CrisisWarningApiTests(unittest.TestCase):
 
         self.assertEqual(result.warning_level, "High")
         self.assertEqual(result.top_risk_drivers[0].direction, "increase_risk")
+        diagnostics = result.model_dump()["diagnostics"]
+        self.assertEqual(
+            diagnostics["training_market_scope"],
+            ["us", "hk", "cn", "jp", "tw"],
+        )
+        self.assertEqual(
+            diagnostics["required_market_scope"],
+            ["us", "hk", "cn", "jp", "tw"],
+        )
+        self.assertEqual(
+            diagnostics["covered_market_scope"],
+            ["us", "hk", "cn", "jp", "tw"],
+        )
+        self.assertEqual(diagnostics["skipped_market_scope"], [])
+        self.assertTrue(diagnostics["is_global_complete"])
+        self.assertEqual(diagnostics["artifact_hash"], "a" * 64)
+        self.assertEqual(diagnostics["feature_schema_hash"], "b" * 64)
+        self.assertEqual(diagnostics["validation_status"], "ok")
 
     def test_endpoint_artifact_missing_returns_503_before_fetch(self) -> None:
         payload = api.CrisisWarningRequest(

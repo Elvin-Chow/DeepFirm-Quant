@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from dataclasses import dataclass
@@ -13,7 +14,12 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from data_pipeline import MarketAligner, SmartFetcher
+from data_pipeline import DataQuality, MarketAligner, SmartFetcher
+from models.crisis_warning_artifact_hash import (
+    ARTIFACT_HASH_ALGORITHM,
+    compute_artifact_hash,
+    normalize_artifact_hash_files,
+)
 from models.market_validation import MarketMode
 from models.ml_risk_engine import ForecastHorizon, MLRiskEngine, RiskLevel
 from models.request_validation import normalize_tickers, validate_common_portfolio_contract
@@ -24,6 +30,68 @@ from models.xgboost_runtime import import_xgboost
 TargetMethod = Literal["dynamic_quantile", "fixed_threshold"]
 DriverDirection = Literal["increase_risk", "decrease_risk"]
 CrisisModelHealth = Literal["ok", "degraded", "unavailable"]
+GLOBAL_CRISIS_MARKET_SCOPE = ("us", "hk", "cn", "jp", "tw")
+VALIDATION_STATUS_OK = "ok"
+VALIDATION_STATUS_PARTIAL_MARKET_COVERAGE = "partial_market_coverage"
+VALIDATION_STATUS_DEGRADED_VALIDATION = "degraded_validation"
+CRISIS_VALIDATION_MIN_ROC_AUC = 0.58
+CRISIS_VALIDATION_MIN_POSITIVE_EVENTS = 250
+CRISIS_VALIDATION_MAX_CALIBRATION_ERROR = 0.10
+CRISIS_WARNING_WEAK_ROC_AUC_WARNING = (
+    "Crisis warning ROC AUC is weak; treat the probability as contextual."
+)
+CRISIS_WARNING_WEAK_PR_AUC_WARNING = (
+    "Crisis warning PR AUC is close to the validation base rate; "
+    "treat the probability as contextual."
+)
+CRISIS_WARNING_ELEVATED_CALIBRATION_ERROR_WARNING = (
+    "Crisis warning raw probability calibration error is elevated."
+)
+CRISIS_WARNING_INSUFFICIENT_VALIDATION_EVENTS_WARNING = (
+    "Crisis warning validation tail-event count is below 250."
+)
+
+
+def crisis_validation_quality_warnings(validation_metrics: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+
+    def optional_metric(key: str) -> Optional[float]:
+        value = validation_metrics.get(key)
+        if value is None:
+            return None
+        try:
+            numeric = float(value)
+        except Exception:
+            return None
+        if not np.isfinite(numeric):
+            return None
+        return numeric
+
+    validation_positive_events = optional_metric("validation_positive_events")
+    if (
+        validation_positive_events is not None
+        and validation_positive_events < CRISIS_VALIDATION_MIN_POSITIVE_EVENTS
+    ):
+        warnings.append(CRISIS_WARNING_INSUFFICIENT_VALIDATION_EVENTS_WARNING)
+
+    roc_auc = optional_metric("roc_auc")
+    if roc_auc is not None and roc_auc < CRISIS_VALIDATION_MIN_ROC_AUC:
+        warnings.append(CRISIS_WARNING_WEAK_ROC_AUC_WARNING)
+
+    pr_auc = optional_metric("pr_auc")
+    validation_positive_rate = optional_metric("positive_rate")
+    if pr_auc is not None and validation_positive_rate is not None:
+        pr_floor = max(validation_positive_rate * 1.25, validation_positive_rate + 0.01)
+        if pr_auc <= pr_floor:
+            warnings.append(CRISIS_WARNING_WEAK_PR_AUC_WARNING)
+
+    calibration_error = optional_metric("calibration_error")
+    if (
+        calibration_error is not None
+        and calibration_error > CRISIS_VALIDATION_MAX_CALIBRATION_ERROR
+    ):
+        warnings.append(CRISIS_WARNING_ELEVATED_CALIBRATION_ERROR_WARNING)
+    return warnings
 
 
 class CrisisWarningUnavailableError(RuntimeError):
@@ -92,6 +160,14 @@ class CrisisWarningDiagnostics(BaseModel):
     positive_rate: float = Field(default=0.0, ge=0.0, le=1.0)
     validation_metrics: Dict[str, float] = Field(default_factory=dict)
     validation_positive_events: int = Field(default=0, ge=0)
+    training_market_scope: List[str] = Field(default_factory=list)
+    required_market_scope: List[str] = Field(default_factory=list)
+    covered_market_scope: List[str] = Field(default_factory=list)
+    skipped_market_scope: List[str] = Field(default_factory=list)
+    is_global_complete: bool = Field(default=False)
+    artifact_hash: str = Field(default="")
+    feature_schema_hash: str = Field(default="")
+    validation_status: str = Field(default="")
     probability_calibrated: bool = Field(default=False)
     shap_fallback_used: bool = Field(default=False)
     feature_count: int = Field(default=0, ge=0)
@@ -115,6 +191,7 @@ class CrisisWarningResult(BaseModel):
     source: str = Field(default="unknown")
     source_detail: str = Field(default="unknown")
     data_warnings: List[str] = Field(default_factory=list)
+    data_quality: DataQuality = Field(default_factory=DataQuality)
 
 
 @dataclass(frozen=True)
@@ -500,6 +577,75 @@ class CrisisWarningArtifactStore:
         return payload
 
     @staticmethod
+    def _sha256_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _metadata_scope(value: Any) -> list[str]:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        if isinstance(value, (list, tuple)):
+            return [str(item) for item in value if str(item)]
+        return []
+
+    @classmethod
+    def _normalize_metadata_contract(cls, metadata: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(metadata)
+        if metadata.get("training_domain") != "diversified_global":
+            return normalized
+
+        required_scope = (
+            cls._metadata_scope(metadata.get("required_market_scope"))
+            or cls._metadata_scope(metadata.get("required_training_markets"))
+            or list(GLOBAL_CRISIS_MARKET_SCOPE)
+        )
+        covered_scope = (
+            cls._metadata_scope(metadata.get("covered_market_scope"))
+            or cls._metadata_scope(metadata.get("covered_training_markets"))
+            or cls._metadata_scope(metadata.get("training_market_scope"))
+        )
+        skipped_scope = (
+            cls._metadata_scope(metadata.get("skipped_market_scope"))
+            or cls._metadata_scope(metadata.get("missing_training_markets"))
+            or cls._metadata_scope(metadata.get("incomplete_training_markets"))
+        )
+
+        complete_value = metadata.get("is_global_complete")
+        if complete_value is None:
+            complete_value = metadata.get("global_domain_complete")
+        is_complete = complete_value is True
+
+        if is_complete:
+            covered_scope = covered_scope or list(required_scope)
+            skipped_scope = []
+        else:
+            if not skipped_scope:
+                skipped_scope = [
+                    market for market in required_scope if market not in set(covered_scope)
+                ]
+            if not skipped_scope and required_scope:
+                skipped_scope = list(required_scope)
+
+        validation_status = str(
+            metadata.get("validation_status")
+            or ("ok" if is_complete else VALIDATION_STATUS_PARTIAL_MARKET_COVERAGE)
+        )
+        if not is_complete and validation_status == "ok":
+            validation_status = VALIDATION_STATUS_PARTIAL_MARKET_COVERAGE
+
+        normalized["required_market_scope"] = required_scope
+        normalized["covered_market_scope"] = covered_scope
+        normalized["skipped_market_scope"] = skipped_scope
+        normalized["is_global_complete"] = is_complete
+        normalized["global_domain_complete"] = is_complete
+        normalized["validation_status"] = validation_status
+        return normalized
+
+    @staticmethod
     def _load_model(path: Path) -> Any:
         try:
             xgb = import_xgboost()
@@ -508,6 +654,27 @@ class CrisisWarningArtifactStore:
         model = xgb.XGBClassifier()
         model.load_model(str(path))
         return model
+
+    @staticmethod
+    def _validate_artifact_hash(directory: Path, metadata: dict[str, Any]) -> None:
+        expected_hash = str(metadata.get("artifact_hash") or "").strip()
+        if not expected_hash:
+            raise ValueError("artifact hash is missing from artifact metadata")
+
+        expected_algorithm = str(metadata.get("artifact_hash_algorithm") or "").strip().lower()
+        if expected_algorithm != ARTIFACT_HASH_ALGORITHM:
+            raise ValueError("artifact hash algorithm does not match artifact metadata")
+
+        try:
+            expected_files = normalize_artifact_hash_files(metadata.get("artifact_hash_files"))
+            actual_hash, actual_files = compute_artifact_hash(directory)
+        except ValueError as exc:
+            raise ValueError(f"artifact hash manifest is invalid: {exc}") from exc
+
+        if expected_files != actual_files:
+            raise ValueError("artifact hash file manifest does not match artifact files")
+        if expected_hash != actual_hash:
+            raise ValueError("artifact hash does not match artifact files")
 
     def directory_for_horizon(self, horizon: ForecastHorizon) -> Path:
         return self.artifact_root / f"global_h{int(horizon)}"
@@ -524,15 +691,24 @@ class CrisisWarningArtifactStore:
             if not required_path.exists():
                 raise FileNotFoundError(f"missing crisis warning artifact file: {required_path}")
 
-        model = self._load_model(model_path)
         schema = self._read_json(schema_path)
-        metadata = self._read_json(metadata_path)
+        metadata = self._normalize_metadata_contract(self._read_json(metadata_path))
+        self._validate_artifact_hash(directory, metadata)
+        expected_schema_hash = str(metadata.get("feature_schema_hash") or "").strip()
+        if expected_schema_hash and expected_schema_hash != self._sha256_file(schema_path):
+            raise ValueError("feature schema hash does not match artifact metadata")
         feature_names = [str(name) for name in schema.get("feature_names", [])]
         CrisisWarningEngine.validate_feature_schema(feature_names, CrisisWarningEngine.feature_columns)
         if int(schema.get("horizon", horizon)) != int(horizon):
             raise ValueError("artifact horizon does not match its directory")
+        model = self._load_model(model_path)
 
         warnings: list[str] = []
+        if (
+            metadata.get("training_domain") == "diversified_global"
+            and metadata.get("is_global_complete") is not True
+        ):
+            warnings.append("Diversified global artifact was trained with partial market coverage.")
         if background_path.exists():
             background = pd.read_csv(background_path)
             missing = [name for name in feature_names if name not in background.columns]
@@ -619,16 +795,10 @@ class CrisisWarningService:
         "Calibrated probability is close to the training tail-event base rate; "
         "treat this reading as a weak baseline signal."
     )
-    weak_roc_auc_warning = (
-        "Crisis warning ROC AUC is weak; treat the probability as contextual."
-    )
-    weak_pr_auc_warning = (
-        "Crisis warning PR AUC is close to the validation base rate; "
-        "treat the probability as contextual."
-    )
-    elevated_calibration_error_warning = (
-        "Crisis warning raw probability calibration error is elevated."
-    )
+    weak_roc_auc_warning = CRISIS_WARNING_WEAK_ROC_AUC_WARNING
+    weak_pr_auc_warning = CRISIS_WARNING_WEAK_PR_AUC_WARNING
+    elevated_calibration_error_warning = CRISIS_WARNING_ELEVATED_CALIBRATION_ERROR_WARNING
+    insufficient_validation_events_warning = CRISIS_WARNING_INSUFFICIENT_VALIDATION_EVENTS_WARNING
 
     def __init__(
         self,
@@ -667,7 +837,7 @@ class CrisisWarningService:
             request.end_date,
             market_mode=request.market,
         )
-        return self.evaluate_from_prices(
+        result = self.evaluate_from_prices(
             tickers=request.tickers,
             price_df=price_df,
             weights=request.weights,
@@ -680,6 +850,10 @@ class CrisisWarningService:
             source_detail=fetcher.last_source_detail,
             data_warnings=list(fetcher.data_warnings),
         )
+        result.data_quality = getattr(fetcher, "last_data_quality", DataQuality()).with_warnings(
+            result.data_warnings
+        )
+        return result
 
     @staticmethod
     def _metadata_float(metadata: dict[str, Any], key: str, default: float = 0.0) -> float:
@@ -710,39 +884,11 @@ class CrisisWarningService:
                 clean[str(key)] = numeric
         return clean
 
-    @staticmethod
-    def _optional_metric(metrics: dict[str, float], key: str) -> Optional[float]:
-        value = metrics.get(key)
-        if value is None:
-            return None
-        try:
-            numeric = float(value)
-        except Exception:
-            return None
-        if not np.isfinite(numeric):
-            return None
-        return numeric
-
     def _validation_quality_warnings(
         self,
         validation_metrics: dict[str, float],
     ) -> list[str]:
-        warnings: list[str] = []
-        roc_auc = self._optional_metric(validation_metrics, "roc_auc")
-        if roc_auc is not None and roc_auc < 0.58:
-            warnings.append(self.weak_roc_auc_warning)
-
-        pr_auc = self._optional_metric(validation_metrics, "pr_auc")
-        validation_positive_rate = self._optional_metric(validation_metrics, "positive_rate")
-        if pr_auc is not None and validation_positive_rate is not None:
-            pr_floor = max(validation_positive_rate * 1.25, validation_positive_rate + 0.01)
-            if pr_auc <= pr_floor:
-                warnings.append(self.weak_pr_auc_warning)
-
-        calibration_error = self._optional_metric(validation_metrics, "calibration_error")
-        if calibration_error is not None and calibration_error > 0.10:
-            warnings.append(self.elevated_calibration_error_warning)
-        return warnings
+        return crisis_validation_quality_warnings(validation_metrics)
 
     def _calibration_warnings(
         self,
@@ -774,7 +920,19 @@ class CrisisWarningService:
         metadata = artifact.metadata
         metadata_warnings = [str(item) for item in metadata.get("warnings", []) or []]
         validation_metrics = self._clean_metrics(metadata.get("validation_metrics", {}) or {})
+        if (
+            "validation_positive_events" not in validation_metrics
+            and "validation_positive_events" in metadata
+        ):
+            validation_metrics["validation_positive_events"] = float(
+                self._metadata_int(metadata, "validation_positive_events")
+            )
         validation_warnings = self._validation_quality_warnings(validation_metrics)
+        validation_status = str(metadata.get("validation_status") or "").strip().lower()
+        if validation_status and validation_status != VALIDATION_STATUS_OK:
+            validation_warnings.append(
+                f"Crisis warning validation status is {validation_status}."
+            )
         all_warnings = list(
             dict.fromkeys(
                 [
@@ -786,12 +944,23 @@ class CrisisWarningService:
             )
         )
         model_health: CrisisModelHealth = "degraded" if all_warnings else "ok"
-        if str(metadata.get("model_health", "")).lower() == "degraded":
+        if str(metadata.get("model_health", "")).lower() in {"degraded", "unavailable"}:
             model_health = "degraded"
 
         asof = ""
         if not latest_features.empty:
             asof = pd.Timestamp(latest_features.index[-1]).date().isoformat()
+        validation_positive_events = self._metadata_int(
+            validation_metrics,
+            "validation_positive_events",
+        )
+        training_market_scope = CrisisWarningArtifactStore._metadata_scope(
+            metadata.get("training_market_scope")
+        )
+        if not training_market_scope:
+            training_market_scope = CrisisWarningArtifactStore._metadata_scope(
+                metadata.get("covered_market_scope")
+            )
 
         return CrisisWarningDiagnostics(
             model_health=model_health,
@@ -803,10 +972,21 @@ class CrisisWarningService:
             positive_events=self._metadata_int(metadata, "positive_events"),
             positive_rate=self._metadata_float(metadata, "positive_rate"),
             validation_metrics=validation_metrics,
-            validation_positive_events=self._metadata_int(
-                validation_metrics,
-                "validation_positive_events",
+            validation_positive_events=validation_positive_events,
+            training_market_scope=training_market_scope,
+            required_market_scope=CrisisWarningArtifactStore._metadata_scope(
+                metadata.get("required_market_scope")
             ),
+            covered_market_scope=CrisisWarningArtifactStore._metadata_scope(
+                metadata.get("covered_market_scope")
+            ),
+            skipped_market_scope=CrisisWarningArtifactStore._metadata_scope(
+                metadata.get("skipped_market_scope")
+            ),
+            is_global_complete=metadata.get("is_global_complete") is True,
+            artifact_hash=str(metadata.get("artifact_hash") or ""),
+            feature_schema_hash=str(metadata.get("feature_schema_hash") or ""),
+            validation_status=validation_status,
             probability_calibrated=artifact.calibration is not None,
             shap_fallback_used=bool(shap_fallback_used),
             feature_count=len(artifact.feature_names),
@@ -893,4 +1073,8 @@ class CrisisWarningService:
             source=source,
             source_detail=source_detail,
             data_warnings=list(data_warnings or []),
+            data_quality=DataQuality(
+                provider_chain=[] if source == "unknown" else [source],
+                warnings=list(data_warnings or []),
+            ),
         )

@@ -67,7 +67,21 @@ class CrisisWarningEngineTests(unittest.TestCase):
             "n_training_rows": 190,
             "positive_events": 18,
             "positive_rate": 0.0947,
-            "validation_metrics": {"validation_positive_events": 4.0, "roc_auc": 0.75},
+            "training_market_scope": "us,hk,cn,jp,tw",
+            "required_market_scope": ["us", "hk", "cn", "jp", "tw"],
+            "covered_market_scope": ["us", "hk", "cn", "jp", "tw"],
+            "skipped_market_scope": [],
+            "is_global_complete": True,
+            "artifact_hash": "a" * 64,
+            "feature_schema_hash": "b" * 64,
+            "validation_status": "ok",
+            "validation_metrics": {
+                "validation_positive_events": 260.0,
+                "positive_rate": 0.05,
+                "roc_auc": 0.75,
+                "pr_auc": 0.20,
+                "calibration_error": 0.02,
+            },
             "warnings": [],
         }
         metadata.update(metadata_overrides or {})
@@ -86,6 +100,33 @@ class CrisisWarningEngineTests(unittest.TestCase):
             calibration=calibration,
             load_warnings=[],
         )
+
+    def _evaluate_with_validation_metrics(
+        self,
+        validation_metrics: dict[str, float],
+    ):
+        prices = self._prices_from_returns(self._tail_rich_returns(rows=140))
+        artifact = self._artifact(
+            probability=0.18,
+            metadata_overrides={"validation_metrics": validation_metrics},
+        )
+
+        with patch.object(
+            CrisisWarningEngine,
+            "shap_values",
+            return_value=(
+                np.zeros(len(CrisisWarningEngine.feature_columns)),
+                0.05,
+                False,
+                [],
+            ),
+        ):
+            return CrisisWarningService(store=FakeStore(artifact)).evaluate_from_prices(
+                tickers=["AAA0", "AAA1"],
+                price_df=prices,
+                weights=[0.5, 0.5],
+                horizon=5,
+            )
 
     def test_future_horizon_return_uses_forward_returns(self) -> None:
         index = pd.date_range("2025-01-02", periods=5, freq="B")
@@ -176,6 +217,14 @@ class CrisisWarningEngineTests(unittest.TestCase):
         self.assertEqual(result.source, "test")
         payload = json.loads(result.model_dump_json())
         self.assertIn("crisis_probability", payload)
+        self.assertEqual(
+            payload["diagnostics"]["training_market_scope"],
+            ["us", "hk", "cn", "jp", "tw"],
+        )
+        self.assertTrue(payload["diagnostics"]["is_global_complete"])
+        self.assertEqual(payload["diagnostics"]["artifact_hash"], "a" * 64)
+        self.assertEqual(payload["diagnostics"]["feature_schema_hash"], "b" * 64)
+        self.assertEqual(payload["diagnostics"]["validation_status"], "ok")
 
     def test_service_warns_when_calibration_bucket_is_flat_and_near_base_rate(self) -> None:
         prices = self._prices_from_returns(self._tail_rich_returns(rows=140))
@@ -218,33 +267,88 @@ class CrisisWarningEngineTests(unittest.TestCase):
         )
 
     def test_service_degrades_weak_validation_metrics(self) -> None:
-        prices = self._prices_from_returns(self._tail_rich_returns(rows=140))
-        artifact = self._artifact(
-            probability=0.18,
-            metadata_overrides={
-                "validation_metrics": {
-                    "validation_positive_events": 20.0,
-                    "positive_rate": 0.05,
-                    "roc_auc": 0.56,
-                    "pr_auc": 0.055,
-                    "calibration_error": 0.12,
-                },
-            },
+        result = self._evaluate_with_validation_metrics(
+            {
+                "validation_positive_events": 20.0,
+                "positive_rate": 0.05,
+                "roc_auc": 0.56,
+                "pr_auc": 0.055,
+                "calibration_error": 0.12,
+            }
         )
 
-        with patch.object(CrisisWarningEngine, "shap_values", return_value=(np.zeros(len(CrisisWarningEngine.feature_columns)), 0.05, False, [])):
-            result = CrisisWarningService(store=FakeStore(artifact)).evaluate_from_prices(
-                tickers=["AAA0", "AAA1"],
-                price_df=prices,
-                weights=[0.5, 0.5],
-                horizon=5,
-            )
-
         self.assertEqual(result.diagnostics.model_health, "degraded")
+        self.assertIn(
+            CrisisWarningService.insufficient_validation_events_warning,
+            result.diagnostics.warnings,
+        )
         self.assertIn(CrisisWarningService.weak_roc_auc_warning, result.diagnostics.warnings)
         self.assertIn(CrisisWarningService.weak_pr_auc_warning, result.diagnostics.warnings)
         self.assertIn(
             CrisisWarningService.elevated_calibration_error_warning,
+            result.diagnostics.warnings,
+        )
+
+    def test_service_degrades_low_roc_auc(self) -> None:
+        result = self._evaluate_with_validation_metrics(
+            {
+                "validation_positive_events": 260.0,
+                "positive_rate": 0.05,
+                "roc_auc": 0.57,
+                "pr_auc": 0.20,
+                "calibration_error": 0.02,
+            }
+        )
+
+        self.assertEqual(result.diagnostics.model_health, "degraded")
+        self.assertIn(CrisisWarningService.weak_roc_auc_warning, result.diagnostics.warnings)
+
+    def test_service_degrades_pr_auc_near_base_rate(self) -> None:
+        result = self._evaluate_with_validation_metrics(
+            {
+                "validation_positive_events": 260.0,
+                "positive_rate": 0.05,
+                "roc_auc": 0.70,
+                "pr_auc": 0.0625,
+                "calibration_error": 0.02,
+            }
+        )
+
+        self.assertEqual(result.diagnostics.model_health, "degraded")
+        self.assertIn(CrisisWarningService.weak_pr_auc_warning, result.diagnostics.warnings)
+
+    def test_service_degrades_high_calibration_error(self) -> None:
+        result = self._evaluate_with_validation_metrics(
+            {
+                "validation_positive_events": 260.0,
+                "positive_rate": 0.05,
+                "roc_auc": 0.70,
+                "pr_auc": 0.20,
+                "calibration_error": 0.11,
+            }
+        )
+
+        self.assertEqual(result.diagnostics.model_health, "degraded")
+        self.assertIn(
+            CrisisWarningService.elevated_calibration_error_warning,
+            result.diagnostics.warnings,
+        )
+
+    def test_service_degrades_insufficient_validation_positive_events(self) -> None:
+        result = self._evaluate_with_validation_metrics(
+            {
+                "validation_positive_events": 249.0,
+                "positive_rate": 0.05,
+                "roc_auc": 0.70,
+                "pr_auc": 0.20,
+                "calibration_error": 0.02,
+            }
+        )
+
+        self.assertEqual(result.diagnostics.model_health, "degraded")
+        self.assertEqual(result.diagnostics.validation_positive_events, 249)
+        self.assertIn(
+            CrisisWarningService.insufficient_validation_events_warning,
             result.diagnostics.warnings,
         )
 
@@ -254,7 +358,7 @@ class CrisisWarningEngineTests(unittest.TestCase):
             probability=0.31,
             metadata_overrides={
                 "validation_metrics": {
-                    "validation_positive_events": 20.0,
+                    "validation_positive_events": 260.0,
                     "positive_rate": 0.05,
                     "roc_auc": 0.72,
                     "pr_auc": 0.18,

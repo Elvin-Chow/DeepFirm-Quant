@@ -26,13 +26,13 @@ export default function MetricCard({
 
   if (variant === "compact") {
     return (
-      <div className="glass-card flex min-h-[6.35rem] min-w-0 flex-col items-start justify-between px-4 py-3 sm:min-h-[6.7rem]">
+      <div className="mobile-metric-card glass-card flex min-h-[6.35rem] min-w-0 flex-col items-start justify-between px-4 py-3 sm:min-h-[6.7rem]">
         <div className="flex w-full min-w-0 items-center justify-start gap-1.5 text-left text-[11px] font-semibold leading-tight text-df-text-secondary">
           <span className="min-w-0 break-words text-left">{label}</span>
           {helpText && <HelpTip text={helpText} />}
         </div>
         <div
-          className={`w-full min-w-0 whitespace-nowrap text-left font-mono text-[1.72rem] font-bold leading-none tracking-normal tabular-nums sm:text-[1.88rem] 2xl:text-[2.02rem] ${valueClass}`}
+          className={`mobile-metric-value w-full min-w-0 whitespace-nowrap text-left font-mono text-[1.72rem] font-bold leading-none tracking-normal tabular-nums sm:text-[1.88rem] 2xl:text-[2.02rem] ${valueClass}`}
         >
           {value}
         </div>
@@ -46,7 +46,7 @@ export default function MetricCard({
   }
 
   return (
-    <div className="glass-card flex min-h-[7.25rem] min-w-0 items-center gap-3.5 p-4 sm:min-h-[7.75rem] sm:p-4">
+    <div className="mobile-metric-card glass-card flex min-h-[7.25rem] min-w-0 items-center gap-3.5 p-4 sm:min-h-[7.75rem] sm:p-4">
       {Icon && (
         <div
           className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-df-border shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_10px_24px_-18px_rgba(0,0,0,0.55)] backdrop-blur-xl ${
@@ -66,7 +66,7 @@ export default function MetricCard({
           {helpText && <HelpTip text={helpText} />}
         </div>
         <div
-          className={`min-w-0 whitespace-nowrap font-mono text-[1.75rem] font-bold leading-none tracking-normal tabular-nums sm:text-[1.9rem] 2xl:text-[2.05rem] ${valueClass}`}
+          className={`mobile-metric-value min-w-0 whitespace-nowrap font-mono text-[1.75rem] font-bold leading-none tracking-normal tabular-nums sm:text-[1.9rem] 2xl:text-[2.05rem] ${valueClass}`}
         >
           {value}
         </div>

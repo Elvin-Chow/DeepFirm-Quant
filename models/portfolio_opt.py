@@ -7,6 +7,7 @@ import numpy as np
 from pydantic import BaseModel, Field, field_validator
 from scipy.optimize import minimize
 
+from data_pipeline import DataQuality
 from models.allocation_policy import AllocationPolicyResult
 from models.request_validation import normalize_tickers
 
@@ -59,6 +60,7 @@ class OptimizationResult(BaseModel):
     source: str = Field(default="unknown", description="Data source used for prices")
     source_detail: str = Field(default="unknown", description="Detailed price data provenance")
     data_warnings: List[str] = Field(default_factory=list, description="Non-fatal data quality warnings")
+    data_quality: DataQuality = Field(default_factory=DataQuality, description="Unified data quality provenance")
     backtest_enabled: bool = Field(default=False)
     benchmark_symbol: str = Field(default="")
     benchmark_name: str = Field(default="")
@@ -90,6 +92,8 @@ class OptimizationResult(BaseModel):
     model_score_alpha: float = Field(default=0.0)
     model_score_stability: float = Field(default=0.0)
     model_score_win_rate: float = Field(default=0.0)
+    policy_asof: str = Field(default="")
+    oos_leakage_guard: bool = Field(default=False)
     allocation_policy: Optional[AllocationPolicyResult] = Field(default=None)
 
 

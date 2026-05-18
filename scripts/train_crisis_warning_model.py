@@ -27,9 +27,19 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from data_pipeline import MarketAligner, SmartFetcher
+from models.crisis_warning_artifact_hash import (
+    ARTIFACT_HASH_ALGORITHM,
+    ARTIFACT_HASH_FILENAMES,
+    compute_artifact_hash,
+    sha256_file,
+)
 from models.crisis_warning_engine import (
     CrisisWarningEngine,
     TargetMethod,
+    VALIDATION_STATUS_DEGRADED_VALIDATION,
+    VALIDATION_STATUS_OK,
+    VALIDATION_STATUS_PARTIAL_MARKET_COVERAGE,
+    crisis_validation_quality_warnings,
 )
 from models.ml_risk_engine import ForecastHorizon
 from models.risk_engine import RiskEngine
@@ -44,48 +54,152 @@ class TrainingPortfolio:
     weights: list[float]
 
 
+@dataclass(frozen=True)
+class MarketTrainingRequirement:
+    portfolio_count: int
+    training_rows: int
+    positive_events: int
+    validation_positive_events: int
+    training_window_days: int
+
+
+GLOBAL_MARKETS = ("us", "hk", "cn", "jp", "tw")
+CORE_ARTIFACT_FILENAMES = ARTIFACT_HASH_FILENAMES
+GLOBAL_MARKET_REQUIREMENT = MarketTrainingRequirement(
+    portfolio_count=4,
+    training_rows=480,
+    positive_events=40,
+    validation_positive_events=50,
+    training_window_days=365 * 5,
+)
+DOMAIN_MARKET_REQUIREMENTS: dict[str, dict[str, MarketTrainingRequirement]] = {
+    "diversified_global": {
+        market: GLOBAL_MARKET_REQUIREMENT
+        for market in GLOBAL_MARKETS
+    },
+}
+
+
 DOMAIN_PRESETS: dict[str, list[TrainingPortfolio]] = {
     "diversified_global": [
         TrainingPortfolio(
-            name="us_growth",
+            name="us_index_beta",
             market="us",
-            tickers=["AAPL", "MSFT", "NVDA", "GOOG", "TSM"],
+            tickers=["SPY", "QQQ", "IWM"],
+            weights=[0.50, 0.30, 0.20],
+        ),
+        TrainingPortfolio(
+            name="us_mega_cap_growth",
+            market="us",
+            tickers=["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL"],
             weights=[],
         ),
         TrainingPortfolio(
-            name="us_cross_asset",
+            name="us_sector_rotation",
             market="us",
-            tickers=["SPY", "QQQ", "GLD", "SLV"],
-            weights=[0.40, 0.25, 0.20, 0.15],
-        ),
-        TrainingPortfolio(
-            name="us_defensive_value",
-            market="us",
-            tickers=["PG", "COST", "JPM", "BRK-B"],
+            tickers=["XLK", "XLF", "XLV", "XLE"],
             weights=[],
         ),
         TrainingPortfolio(
-            name="hk_large_cap",
+            name="us_defensive_quality",
+            market="us",
+            tickers=["XLP", "COST", "PG", "JNJ"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="hk_index_beta",
             market="hk",
-            tickers=["02800.HK", "0005.HK", "03988.HK"],
+            tickers=["02800.HK", "02828.HK", "03033.HK"],
             weights=[],
         ),
         TrainingPortfolio(
-            name="cn_large_cap",
+            name="hk_large_cap_platforms",
+            market="hk",
+            tickers=["0700.HK", "9988.HK", "3690.HK", "1299.HK"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="hk_financial_property",
+            market="hk",
+            tickers=["0005.HK", "0388.HK", "0016.HK", "0823.HK"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="hk_defensive_yield",
+            market="hk",
+            tickers=["0002.HK", "0003.HK", "1038.HK", "2638.HK"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="cn_index_beta",
             market="cn",
-            tickers=["600519", "300750", "000001", "601988"],
+            tickers=["510300", "510050", "510500"],
             weights=[],
         ),
         TrainingPortfolio(
-            name="jp_large_cap",
+            name="cn_large_cap_core",
+            market="cn",
+            tickers=["600519", "300750", "601318", "600036"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="cn_sector_growth",
+            market="cn",
+            tickers=["002594", "300760", "688981", "300124"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="cn_defensive_value",
+            market="cn",
+            tickers=["600900", "601398", "600276", "000333"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="jp_index_beta",
             market="jp",
-            tickers=["7203.T", "6758.T", "9984.T"],
+            tickers=["1321.T", "1306.T", "1348.T"],
             weights=[],
         ),
         TrainingPortfolio(
-            name="tw_large_cap",
+            name="jp_large_cap_core",
+            market="jp",
+            tickers=["7203.T", "6758.T", "9984.T", "6861.T", "8306.T"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="jp_exporter_industrials",
+            market="jp",
+            tickers=["7203.T", "7267.T", "8035.T", "6954.T", "6501.T"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="jp_defensive_value",
+            market="jp",
+            tickers=["9432.T", "4502.T", "3382.T", "2914.T"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="tw_index_beta",
             market="tw",
-            tickers=["2330.TW", "2317.TW", "2454.TW"],
+            tickers=["0050.TW", "006208.TW", "0056.TW"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="tw_large_cap_core",
+            market="tw",
+            tickers=["2330.TW", "2317.TW", "2454.TW", "2308.TW", "2881.TW"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="tw_semiconductor_chain",
+            market="tw",
+            tickers=["2330.TW", "2454.TW", "2303.TW", "3711.TW", "3034.TW"],
+            weights=[],
+        ),
+        TrainingPortfolio(
+            name="tw_defensive_income",
+            market="tw",
+            tickers=["2412.TW", "1303.TW", "1216.TW", "3045.TW", "2886.TW"],
             weights=[],
         ),
     ],
@@ -121,6 +235,15 @@ def finite_metrics(metrics: dict[str, Any]) -> dict[str, float]:
         if np.isfinite(numeric):
             clean[key] = numeric
     return clean
+
+
+def clip_probabilities(probabilities: np.ndarray) -> np.ndarray:
+    return np.clip(np.asarray(probabilities, dtype=float), 0.0, 1.0)
+
+
+def core_artifact_hash(output_dir: Path) -> str:
+    artifact_hash, _ = compute_artifact_hash(output_dir)
+    return artifact_hash
 
 
 def validation_metrics(y_true: np.ndarray, probabilities: np.ndarray) -> dict[str, float]:
@@ -252,6 +375,260 @@ def build_domain_training_frame(
     return combined, details, skipped
 
 
+def market_requirement_payload(requirement: MarketTrainingRequirement) -> dict[str, int]:
+    return {
+        "portfolio_count": int(requirement.portfolio_count),
+        "training_rows": int(requirement.training_rows),
+        "positive_events": int(requirement.positive_events),
+        "validation_positive_events": int(requirement.validation_positive_events),
+        "training_window_days": int(requirement.training_window_days),
+    }
+
+
+def _market_frame_stats(label_frame: pd.DataFrame) -> dict[str, dict[str, Any]]:
+    stats: dict[str, dict[str, Any]] = {}
+    if "domain_market" not in label_frame.columns:
+        return stats
+    for market, market_frame in label_frame.groupby("domain_market", sort=True):
+        if market_frame.empty:
+            continue
+        start = pd.Timestamp(market_frame.index.min()).date()
+        end = pd.Timestamp(market_frame.index.max()).date()
+        stats[str(market)] = {
+            "training_rows": int(len(market_frame)),
+            "positive_events": int(market_frame["tail_event"].sum()),
+            "training_start": str(start),
+            "training_end": str(end),
+            "training_window_days": int((end - start).days),
+        }
+    return stats
+
+
+def _validation_positive_events(validation_frame: pd.DataFrame) -> dict[str, int]:
+    if "domain_market" not in validation_frame.columns or validation_frame.empty:
+        return {}
+    return {
+        str(market): int(market_frame["tail_event"].sum())
+        for market, market_frame in validation_frame.groupby("domain_market", sort=True)
+    }
+
+
+def build_per_market_summary(
+    ordered_markets: list[str],
+    portfolio_details: list[dict[str, Any]],
+    frame_stats: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    details_by_market: dict[str, list[dict[str, Any]]] = {}
+    for detail in portfolio_details:
+        details_by_market.setdefault(str(detail["market"]), []).append(detail)
+
+    summaries: list[dict[str, Any]] = []
+    for market in ordered_markets:
+        details = details_by_market.get(market, [])
+        stats = frame_stats.get(market, {})
+        n_training_rows = int(stats.get("training_rows", 0))
+        positive_events = int(stats.get("positive_events", 0))
+        positive_rate = float(positive_events / n_training_rows) if n_training_rows else 0.0
+        summaries.append(
+            {
+                "market": market,
+                "portfolio_count": int(len(details)),
+                "n_observations": int(
+                    sum(int(detail.get("n_observations", 0)) for detail in details)
+                ),
+                "n_training_rows": n_training_rows,
+                "positive_events": positive_events,
+                "positive_rate": positive_rate,
+                "training_start": str(stats.get("training_start", "")),
+                "training_end": str(stats.get("training_end", "")),
+            }
+        )
+    return summaries
+
+
+def build_domain_coverage_summary(
+    domain_preset: str,
+    portfolios: list[TrainingPortfolio],
+    portfolio_details: list[dict[str, Any]],
+    skipped_portfolios: list[dict[str, str]],
+    label_frame: pd.DataFrame,
+    validation_frame: pd.DataFrame,
+) -> dict[str, Any]:
+    requirements = DOMAIN_MARKET_REQUIREMENTS.get(domain_preset, {})
+    detail_by_market: dict[str, list[dict[str, Any]]] = {}
+    for detail in portfolio_details:
+        detail_by_market.setdefault(str(detail["market"]), []).append(detail)
+
+    skipped_by_market: dict[str, list[dict[str, str]]] = {}
+    for skipped in skipped_portfolios:
+        skipped_by_market.setdefault(str(skipped["market"]), []).append(skipped)
+
+    preset_counts: dict[str, int] = {}
+    for portfolio in portfolios:
+        preset_counts[portfolio.market] = preset_counts.get(portfolio.market, 0) + 1
+
+    frame_stats = _market_frame_stats(label_frame)
+    validation_positives = _validation_positive_events(validation_frame)
+    ordered_markets = [
+        market
+        for market in GLOBAL_MARKETS
+        if (
+            market in requirements
+            or market in preset_counts
+            or market in detail_by_market
+            or market in skipped_by_market
+        )
+    ]
+    for market in sorted(
+        set(preset_counts) | set(detail_by_market) | set(skipped_by_market)
+    ):
+        if market not in ordered_markets:
+            ordered_markets.append(market)
+
+    market_summaries: dict[str, dict[str, Any]] = {}
+    for market in ordered_markets:
+        requirement = requirements.get(market)
+        details = detail_by_market.get(market, [])
+        skipped = skipped_by_market.get(market, [])
+        stats = frame_stats.get(market, {})
+        portfolio_count = int(len(details))
+        training_rows = int(stats.get("training_rows", 0))
+        positive_events = int(stats.get("positive_events", 0))
+        validation_count = int(validation_positives.get(market, 0))
+        window_days = int(stats.get("training_window_days", 0))
+        missing_requirements: list[str] = []
+        if requirement is not None:
+            if portfolio_count < requirement.portfolio_count:
+                missing_requirements.append("portfolio_count")
+            if training_rows < requirement.training_rows:
+                missing_requirements.append("training_rows")
+            if positive_events < requirement.positive_events:
+                missing_requirements.append("positive_events")
+            if validation_count < requirement.validation_positive_events:
+                missing_requirements.append("validation_positive_events")
+            if window_days < requirement.training_window_days:
+                missing_requirements.append("training_window")
+            if skipped:
+                missing_requirements.append("skipped_portfolios")
+        status = "complete"
+        if requirement is not None and missing_requirements:
+            status = "missing" if portfolio_count == 0 else "partial"
+        elif requirement is None and skipped and not details:
+            status = "skipped"
+
+        market_summaries[market] = {
+            "status": status,
+            "defined_portfolio_count": int(preset_counts.get(market, 0)),
+            "portfolio_count": portfolio_count,
+            "training_rows": training_rows,
+            "positive_events": positive_events,
+            "validation_positive_events": validation_count,
+            "training_start": stats.get("training_start", ""),
+            "training_end": stats.get("training_end", ""),
+            "training_window_days": window_days,
+            "missing_requirements": missing_requirements,
+            "skipped_portfolio_count": int(len(skipped)),
+            "skipped_portfolios": skipped,
+        }
+
+    required_markets = list(requirements.keys())
+    incomplete_markets = [
+        market
+        for market in required_markets
+        if market_summaries.get(market, {}).get("status") != "complete"
+    ]
+    coverage_complete = not incomplete_markets if requirements else True
+    complete_markets = [
+        market
+        for market in ordered_markets
+        if market_summaries.get(market, {}).get("status") == "complete"
+    ]
+    required_covered_markets = [
+        market
+        for market in required_markets
+        if market_summaries.get(market, {}).get("status") == "complete"
+    ]
+    skipped_market_scope = [
+        market
+        for market in required_markets
+        if market_summaries.get(market, {}).get("status") != "complete"
+    ]
+    per_market_summary = build_per_market_summary(
+        ordered_markets=ordered_markets,
+        portfolio_details=portfolio_details,
+        frame_stats=frame_stats,
+    )
+    return {
+        "domain_preset": domain_preset,
+        "domain_coverage_status": "complete" if coverage_complete else "partial",
+        "global_domain_complete": bool(requirements and coverage_complete),
+        "required_market_scope": required_markets,
+        "covered_market_scope": required_covered_markets if requirements else complete_markets,
+        "skipped_market_scope": skipped_market_scope,
+        "is_global_complete": bool(requirements and coverage_complete),
+        "per_market_summary": per_market_summary,
+        "required_markets": required_markets,
+        "covered_markets": [
+            market
+            for market in ordered_markets
+            if int(market_summaries[market]["portfolio_count"]) > 0
+        ],
+        "missing_markets": [
+            market
+            for market in required_markets
+            if int(market_summaries.get(market, {}).get("portfolio_count", 0)) == 0
+        ],
+        "incomplete_markets": incomplete_markets,
+        "market_requirements": {
+            market: market_requirement_payload(requirement)
+            for market, requirement in requirements.items()
+        },
+        "markets": market_summaries,
+    }
+
+
+def validate_domain_coverage(
+    domain_preset: str,
+    coverage_summary: dict[str, Any],
+    allow_domain_partial: bool,
+) -> None:
+    if domain_preset not in DOMAIN_MARKET_REQUIREMENTS:
+        return
+    if coverage_summary.get("is_global_complete") is True:
+        return
+    if allow_domain_partial:
+        if not coverage_summary.get("skipped_market_scope"):
+            raise ValueError(
+                f"{domain_preset} partial training coverage must identify skipped markets"
+            )
+        return
+    incomplete = ", ".join(
+        coverage_summary.get("skipped_market_scope")
+        or coverage_summary.get("incomplete_markets", [])
+    )
+    raise ValueError(
+        f"{domain_preset} training coverage is incomplete: {incomplete}"
+    )
+
+
+def validation_status_from_training(
+    coverage_summary: dict[str, Any],
+    validation_positive_events: int,
+    validation_metrics: dict[str, Any] | None = None,
+) -> str:
+    if (
+        coverage_summary.get("required_market_scope")
+        and coverage_summary.get("is_global_complete") is not True
+    ):
+        return VALIDATION_STATUS_PARTIAL_MARKET_COVERAGE
+
+    metrics = dict(validation_metrics or {})
+    metrics.setdefault("validation_positive_events", float(validation_positive_events))
+    if crisis_validation_quality_warnings(metrics):
+        return VALIDATION_STATUS_DEGRADED_VALIDATION
+    return VALIDATION_STATUS_OK
+
+
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train crisis warning XGBoost artifacts.")
     parser.add_argument("--market", choices=["us", "hk", "cn", "jp", "tw"], default="us")
@@ -320,6 +697,19 @@ def main() -> int:
     validation_frame = label_frame.iloc[split_idx:]
     y_train = train_frame["tail_event"].astype(int).to_numpy()
     y_validation = validation_frame["tail_event"].astype(int).to_numpy()
+    domain_coverage_summary = build_domain_coverage_summary(
+        domain_preset=args.domain_preset,
+        portfolios=portfolios,
+        portfolio_details=portfolio_details,
+        skipped_portfolios=skipped_portfolios,
+        label_frame=label_frame,
+        validation_frame=validation_frame,
+    )
+    validate_domain_coverage(
+        domain_preset=args.domain_preset,
+        coverage_summary=domain_coverage_summary,
+        allow_domain_partial=bool(args.allow_domain_partial),
+    )
     train_positive = int(y_train.sum())
     train_negative = int(len(y_train) - train_positive)
     if train_positive <= 0 or train_negative <= 0:
@@ -344,22 +734,26 @@ def main() -> int:
     raw_validation_probabilities = model.predict_proba(validation_frame[feature_names])[:, 1]
     metrics = validation_metrics(y_validation, raw_validation_probabilities)
     validation_positive_events = int(y_validation.sum())
+    validation_status = validation_status_from_training(
+        coverage_summary=domain_coverage_summary,
+        validation_positive_events=validation_positive_events,
+        validation_metrics=metrics,
+    )
+    validation_quality_warnings = crisis_validation_quality_warnings(metrics)
     warnings: list[str] = []
-    model_health = "ok"
     if skipped_portfolios:
         warnings.append("Some training domain portfolios were skipped.")
-    if validation_positive_events < 3:
-        model_health = "degraded"
-        warnings.append("Validation tail-event count is too low.")
-    if warnings:
-        model_health = "degraded"
+    if domain_coverage_summary["domain_coverage_status"] != "complete":
+        warnings.append("Training domain coverage is partial.")
+    warnings.extend(validation_quality_warnings)
+    model_health = "degraded" if validation_status != VALIDATION_STATUS_OK or warnings else "ok"
 
     probability_calibrated = False
     calibration_payload: dict[str, Any] | None = None
     if validation_positive_events >= 10 and np.unique(y_validation).size == 2:
         calibrator = IsotonicRegression(out_of_bounds="clip")
         calibrator.fit(raw_validation_probabilities, y_validation)
-        calibrated = calibrator.predict(raw_validation_probabilities)
+        calibrated = clip_probabilities(calibrator.predict(raw_validation_probabilities))
         metrics["calibrated_brier_score"] = brier_score_loss(y_validation, calibrated)
         metrics["calibrated_log_loss"] = log_loss(y_validation, calibrated, labels=[0, 1])
         calibration_payload = {
@@ -397,13 +791,32 @@ def main() -> int:
         target_method=target_method,
         fixed_threshold=args.fixed_threshold,
     )
+    feature_schema_path = output_dir / "feature_schema.json"
+    metadata_path = output_dir / "training_metadata.json"
+    calibration_path = output_dir / "calibration.json"
+    feature_schema_path.write_text(
+        json.dumps(schema, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    if calibration_payload is not None:
+        calibration_path.write_text(
+            json.dumps(calibration_payload, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    elif calibration_path.exists():
+        calibration_path.unlink()
+
+    artifact_hash, artifact_hash_files = compute_artifact_hash(output_dir)
+    feature_schema_hash = sha256_file(feature_schema_path)
     metadata = {
         "model_version": f"crisis-warning-xgb-h{int(horizon)}-{now[:10]}",
         "model_name": "XGBClassifier",
         "model_health": model_health,
         "trained_at": now,
         "training_domain": args.domain_preset,
-        "training_market_scope": ",".join(sorted({detail["market"] for detail in portfolio_details})),
+        "training_market_scope": ",".join(
+            sorted({detail["market"] for detail in portfolio_details})
+        ),
         "training_start": str(label_frame.index[0].date()),
         "training_end": str(label_frame.index[-1].date()),
         "n_observations": int(sum(detail["n_observations"] for detail in portfolio_details)),
@@ -413,6 +826,24 @@ def main() -> int:
         "domain_portfolio_count": int(len(portfolio_details)),
         "domain_portfolios": portfolio_details,
         "skipped_domain_portfolios": skipped_portfolios,
+        "required_market_scope": domain_coverage_summary["required_market_scope"],
+        "covered_market_scope": domain_coverage_summary["covered_market_scope"],
+        "skipped_market_scope": domain_coverage_summary["skipped_market_scope"],
+        "is_global_complete": bool(domain_coverage_summary["is_global_complete"]),
+        "per_market_summary": domain_coverage_summary["per_market_summary"],
+        "artifact_hash": artifact_hash,
+        "artifact_hash_algorithm": ARTIFACT_HASH_ALGORITHM,
+        "artifact_hash_files": artifact_hash_files,
+        "feature_schema_hash": feature_schema_hash,
+        "validation_status": validation_status,
+        "domain_coverage_status": domain_coverage_summary["domain_coverage_status"],
+        "global_domain_complete": bool(domain_coverage_summary["global_domain_complete"]),
+        "required_training_markets": domain_coverage_summary["required_markets"],
+        "covered_training_markets": domain_coverage_summary["covered_markets"],
+        "missing_training_markets": domain_coverage_summary["missing_markets"],
+        "incomplete_training_markets": domain_coverage_summary["incomplete_markets"],
+        "domain_market_requirements": domain_coverage_summary["market_requirements"],
+        "domain_market_coverage": domain_coverage_summary["markets"],
         "target_definition": target_definition,
         "validation_metrics": finite_metrics(metrics),
         "probability_calibrated": probability_calibrated,
@@ -424,19 +855,10 @@ def main() -> int:
         "warnings": warnings,
     }
 
-    (output_dir / "feature_schema.json").write_text(
-        json.dumps(schema, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-    (output_dir / "training_metadata.json").write_text(
+    metadata_path.write_text(
         json.dumps(metadata, indent=2, sort_keys=True),
         encoding="utf-8",
     )
-    if calibration_payload is not None:
-        (output_dir / "calibration.json").write_text(
-            json.dumps(calibration_payload, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
 
     print(json.dumps({"output_dir": str(output_dir), "metadata": metadata}, indent=2, sort_keys=True))
     return 0

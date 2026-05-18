@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useTheme } from "@/hooks/useTheme";
 import { OptimizationResult } from "@/types/api";
 import { t, Lang } from "@/lib/i18n";
@@ -46,6 +47,20 @@ interface DecisionTabProps {
   loading: boolean;
   lang: Lang;
   minWeight: number;
+}
+
+function useCompactViewport(): boolean {
+  const [compact, setCompact] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 640px)");
+    const updateCompact = () => setCompact(mediaQuery.matches);
+    updateCompact();
+    mediaQuery.addEventListener("change", updateCompact);
+    return () => mediaQuery.removeEventListener("change", updateCompact);
+  }, []);
+
+  return compact;
 }
 
 function finiteNumber(value: unknown, fallback: number): number {
@@ -321,13 +336,13 @@ function DecisionMetricCard({
   caption?: string;
 }) {
   return (
-    <GlassCard className="flex min-h-[6.35rem] min-w-0 flex-col !p-4">
+    <GlassCard className="mobile-metric-card flex min-h-[6.35rem] min-w-0 flex-col !p-4">
       <div className="flex min-h-[1.15rem] min-w-0 items-start gap-1.5 text-xs font-semibold text-df-text-secondary">
         <span className="min-w-0 break-words">{label}</span>
         {helpText && <HelpTip text={helpText} />}
       </div>
       <div
-        className={`mt-3 min-w-0 break-words font-mono text-[2rem] font-bold leading-none tracking-normal tabular-nums ${valueClass ?? "text-df-text"}`}
+        className={`mobile-metric-value mt-3 min-w-0 break-words font-mono text-[2rem] font-bold leading-none tracking-normal tabular-nums ${valueClass ?? "text-df-text"}`}
       >
         {value}
       </div>
@@ -348,6 +363,7 @@ function WeightDonutChart({
   cellPrefix,
   isDark,
   axisColor,
+  compact = false,
 }: {
   title: string;
   helpText: string;
@@ -356,6 +372,7 @@ function WeightDonutChart({
   cellPrefix: string;
   isDark: boolean;
   axisColor: string;
+  compact?: boolean;
 }) {
   return (
     <div className="flex min-h-[13rem] min-w-0 flex-1 flex-col">
@@ -370,10 +387,10 @@ function WeightDonutChart({
               data={data}
               dataKey="value"
               nameKey="name"
-              cx="40%"
-              cy="50%"
-              innerRadius="43%"
-              outerRadius="70%"
+              cx={compact ? "50%" : "40%"}
+              cy={compact ? "43%" : "50%"}
+              innerRadius={compact ? "38%" : "43%"}
+              outerRadius={compact ? "61%" : "70%"}
               stroke={isDark ? "#0b0c10" : "#fffdfa"}
               strokeWidth={2}
               rootTabIndex={-1}
@@ -390,14 +407,15 @@ function WeightDonutChart({
               formatter={(value: any, name: any) => [formatWeightPercent(value), name]}
             />
             <Legend
-              align="right"
-              layout="vertical"
-              verticalAlign="middle"
+              align={compact ? "center" : "right"}
+              layout={compact ? "horizontal" : "vertical"}
+              verticalAlign={compact ? "bottom" : "middle"}
               wrapperStyle={{
                 color: axisColor,
-                fontSize: 12,
-                lineHeight: "22px",
-                paddingLeft: 8,
+                fontSize: compact ? 10 : 12,
+                lineHeight: compact ? "16px" : "22px",
+                paddingLeft: compact ? 0 : 8,
+                paddingTop: compact ? 6 : 0,
               }}
             />
           </PieChart>
@@ -410,6 +428,7 @@ function WeightDonutChart({
 export default function DecisionTab({ data, loading, lang, minWeight }: DecisionTabProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
+  const compactViewport = useCompactViewport();
 
   if (loading) return <Loading />;
   if (!data) return <EmptyState text={t(lang, "emptyDecision")} />;
@@ -749,6 +768,7 @@ export default function DecisionTab({ data, loading, lang, minWeight }: Decision
               cellPrefix="prior"
               isDark={isDark}
               axisColor={axisColor}
+              compact={compactViewport}
             />
             <div className="flex min-w-0 xl:pl-5">
               <WeightDonutChart
@@ -759,6 +779,7 @@ export default function DecisionTab({ data, loading, lang, minWeight }: Decision
                 cellPrefix="post"
                 isDark={isDark}
                 axisColor={axisColor}
+                compact={compactViewport}
               />
             </div>
           </div>
@@ -1052,6 +1073,7 @@ export default function DecisionTab({ data, loading, lang, minWeight }: Decision
         benchmarkSourceDetail={data.benchmark_source_detail}
         riskFreeRateSource={data.risk_free_rate_source}
         riskFreeRateSourceDetail={data.risk_free_rate_source_detail}
+        dataQuality={data.data_quality}
         compact
       />
     </div>

@@ -29,7 +29,7 @@ import type { CurrencySymbol } from "@/lib/currency";
 import { Preset } from "@/hooks/usePresets";
 import { useTheme } from "@/hooks/useTheme";
 import HelpTip from "@/components/ui/HelpTip";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 interface SidebarProps {
   tickers: string;
@@ -85,6 +85,7 @@ interface SidebarProps {
   setLang: (v: Lang) => void;
   currencySymbol: CurrencySymbol;
   presets: Preset[];
+  presetResetKey: number;
   onSavePreset: (name: string) => void;
   onLoadPreset: (preset: Preset) => void;
   onDeletePreset: (name: string) => void;
@@ -212,6 +213,7 @@ export default function Sidebar(props: SidebarProps) {
     setLang,
     currencySymbol,
     presets,
+    presetResetKey,
     onSavePreset,
     onLoadPreset,
     onDeletePreset,
@@ -223,7 +225,9 @@ export default function Sidebar(props: SidebarProps) {
   const [presetName, setPresetName] = useState("");
   const [showSave, setShowSave] = useState(false);
   const [selectedPresetName, setSelectedPresetName] = useState("");
+  const [presetMenuOpen, setPresetMenuOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const presetMenuRef = useRef<HTMLDivElement | null>(null);
 
   const tickerList = tickers
     .split(",")
@@ -243,6 +247,30 @@ export default function Sidebar(props: SidebarProps) {
     setMounted(true);
   }, []);
 
+  useEffect(() => {
+    if (!selectedPresetName) return;
+    if (!presets.some((preset) => preset.name === selectedPresetName)) {
+      setSelectedPresetName("");
+    }
+  }, [presets, selectedPresetName]);
+
+  useEffect(() => {
+    setSelectedPresetName("");
+    setPresetMenuOpen(false);
+  }, [presetResetKey]);
+
+  useEffect(() => {
+    if (!presetMenuOpen) return undefined;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (presetMenuRef.current?.contains(event.target as Node)) return;
+      setPresetMenuOpen(false);
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [presetMenuOpen]);
+
   const handleWeightChange = (index: number, value: number) => {
     const next = [...weights];
     next[index] = value;
@@ -260,6 +288,7 @@ export default function Sidebar(props: SidebarProps) {
   return (
     <aside
       className={`
+        mobile-sidebar
         h-[100dvh] w-[min(330px,100vw)] shrink-0 overflow-hidden border-r border-df-border bg-[rgba(252,252,252,0.94)] shadow-[18px_0_44px_-40px_rgba(15,23,42,0.26)] backdrop-blur-2xl dark:bg-[rgba(12,15,15,0.94)] dark:shadow-[18px_0_54px_-46px_rgba(0,0,0,0.98)] sm:w-[330px] lg:h-screen
         flex flex-col
         fixed top-0 left-0 z-50 transform transition-[background-color,border-color,transform] duration-300 ease-out
@@ -267,7 +296,7 @@ export default function Sidebar(props: SidebarProps) {
         ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
       `}
     >
-      <div className="border-b border-df-border px-5 py-4">
+      <div className="mobile-sidebar-header border-b border-df-border px-5 py-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="truncate text-[22px] font-bold tracking-tight text-[#111111] dark:text-[#d7dcde]">
             <span>DeepFirm</span>{" "}
@@ -276,7 +305,7 @@ export default function Sidebar(props: SidebarProps) {
           {onCloseMobile && (
             <button
               onClick={onCloseMobile}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-df-text-secondary transition-colors hover:bg-df-surface-solid/30 hover:text-df-text lg:hidden"
+              className="flex h-10 w-10 items-center justify-center rounded-md text-df-text-secondary transition-colors hover:bg-df-surface-solid/30 hover:text-df-text lg:hidden"
               aria-label="Close menu"
             >
               <X size={18} />
@@ -331,7 +360,7 @@ export default function Sidebar(props: SidebarProps) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+      <div className="mobile-sidebar-content min-h-0 flex-1 overflow-y-auto px-3 py-4">
         {error && (
           <div className="mb-4 p-3 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 text-red-700 dark:text-red-300 text-sm flex items-start gap-2">
             <AlertCircle size={16} className="shrink-0 mt-0.5" />
@@ -350,44 +379,79 @@ export default function Sidebar(props: SidebarProps) {
         <AccordionSection icon={FolderOpen} title={t(lang, "savedPresets")}>
           <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
             <div
-              className={`relative min-w-0 rounded-xl border border-df-border/80 bg-df-surface-solid/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] transition-all focus-within:border-df-accent/60 focus-within:ring-2 focus-within:ring-df-accent/20 hover:border-df-accent/35 ${
-                presets.length === 0 ? "opacity-60" : ""
-              }`}
+              ref={presetMenuRef}
+              className={`relative min-w-0 ${presets.length === 0 ? "opacity-60" : ""}`}
             >
-              <FolderOpen
-                size={15}
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-df-text-secondary"
-              />
-              <select
-              className="h-11 w-full min-w-0 appearance-none rounded-xl bg-transparent py-2 pl-9 pr-9 text-sm font-medium text-df-text outline-none transition-colors disabled:cursor-not-allowed sm:h-10"
-                onChange={(e) => {
-                  const name = e.target.value;
-                  setSelectedPresetName(name);
-                  const preset = presets.find((item) => item.name === name);
-                  if (preset) onLoadPreset(preset);
-                }}
-                value={selectedPresetName}
+              <button
+                type="button"
+                onClick={() => setPresetMenuOpen((current) => presets.length > 0 && !current)}
                 disabled={presets.length === 0}
+                aria-expanded={presetMenuOpen}
+                className={`flex h-11 w-full min-w-0 items-center gap-3 rounded-xl border px-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] transition-all click-press sm:h-10 ${
+                  presetMenuOpen
+                    ? "border-df-accent/55 bg-df-surface-solid/55 ring-2 ring-df-accent/15"
+                    : "border-df-border/80 bg-df-surface-solid/45 hover:border-df-accent/35"
+                } disabled:cursor-not-allowed`}
               >
-                <option value="" disabled>
-                  {t(lang, "loadPortfolio")}
-                </option>
-                {presets.map((preset) => (
-                  <option key={preset.name} value={preset.name}>
-                    {preset.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={15}
-                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-df-text-secondary"
-              />
+                <FolderOpen size={15} className="shrink-0 text-df-text-secondary" />
+                <span className={`min-w-0 flex-1 truncate text-sm font-semibold ${selectedPreset ? "text-df-text" : "text-df-text-secondary"}`}>
+                  {selectedPreset?.name || t(lang, "loadPortfolio")}
+                </span>
+                <ChevronDown
+                  size={15}
+                  className={`shrink-0 text-df-text-secondary transition-transform ${presetMenuOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+
+              {presetMenuOpen && (
+                <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-xl border border-df-border/80 bg-[rgba(252,252,252,0.98)] p-1.5 shadow-[0_18px_46px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:bg-[rgba(14,17,18,0.98)] dark:shadow-[0_18px_50px_-28px_rgba(0,0,0,0.92)]">
+                  <div className="max-h-56 space-y-1 overflow-y-auto pr-0.5">
+                    {presets.map((preset) => {
+                      const selected = preset.name === selectedPresetName;
+                      return (
+                        <button
+                          key={preset.name}
+                          type="button"
+                          onClick={() => {
+                            setSelectedPresetName(preset.name);
+                            setPresetMenuOpen(false);
+                            onLoadPreset(preset);
+                          }}
+                          className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                            selected
+                              ? "bg-df-accent/12 text-df-text"
+                              : "text-df-text-secondary hover:bg-df-surface-solid/35 hover:text-df-text"
+                          }`}
+                        >
+                          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border ${
+                            selected
+                              ? "border-df-accent/35 bg-df-accent/10 text-df-accent"
+                              : "border-df-border/70 bg-df-surface-solid/20"
+                          }`}>
+                            <FolderOpen size={14} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold leading-5">
+                              {preset.name}
+                            </span>
+                            <span className="block truncate text-[11px] font-medium text-df-text-secondary">
+                              {preset.market.toUpperCase()} · {preset.tickers}
+                            </span>
+                          </span>
+                          {selected && <Check size={14} className="shrink-0 text-df-accent" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
             <button
               onClick={() => {
                 if (!selectedPreset) return;
                 onDeletePreset(selectedPreset.name);
                 setSelectedPresetName("");
+                setPresetMenuOpen(false);
               }}
               disabled={!selectedPreset}
               className="flex h-11 w-11 items-center justify-center rounded-xl border border-df-border/80 bg-df-surface-solid/35 text-df-text-secondary shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] transition-all hover:border-df-danger/60 hover:bg-df-danger/10 hover:text-df-danger disabled:cursor-not-allowed disabled:opacity-40 sm:h-10 sm:w-10"
@@ -826,7 +890,7 @@ export default function Sidebar(props: SidebarProps) {
         </AccordionSection>
       </div>
 
-      <div className="shrink-0 border-t border-df-border bg-[rgba(252,252,252,0.96)] p-3 shadow-[0_-18px_34px_-32px_rgba(15,23,42,0.28)] dark:bg-[rgba(12,15,15,0.96)] dark:shadow-[0_-18px_38px_-32px_rgba(0,0,0,0.95)]">
+      <div className="mobile-sidebar-footer shrink-0 border-t border-df-border bg-[rgba(252,252,252,0.96)] p-3 shadow-[0_-18px_34px_-32px_rgba(15,23,42,0.28)] dark:bg-[rgba(12,15,15,0.96)] dark:shadow-[0_-18px_38px_-32px_rgba(0,0,0,0.95)]">
         <button
           type="button"
           onClick={onRun}

@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Shield,
   Wifi,
+  type LucideIcon,
 } from "lucide-react";
 import { getApi } from "@/hooks/useApi";
 import { t, Lang } from "@/lib/i18n";
@@ -35,6 +36,76 @@ const changelogTypeOrder: Record<ChangelogEntry["items"][number]["type"], number
 };
 
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "V5.0.0",
+    date: "2026-05-18",
+    items: [
+      {
+        type: "added",
+        text: {
+          en: "Backend responses now carry unified data quality metadata, including provider chain, cache status, exchange calendar, coverage, as-of date, stale/partial flags, and warnings.",
+          zh: "后端响应现在统一返回数据质量元信息，包括真实来源链路、缓存状态、交易日历、覆盖率、截至日期、陈旧/不完整标记和风险提示。",
+          tc: "後端回應現在統一返回資料品質元資訊，包括真實來源鏈路、快取狀態、交易日曆、覆蓋率、截至日期、陳舊/不完整標記和風險提示。",
+        },
+      },
+      {
+        type: "added",
+        text: {
+          en: "API request handling now includes request IDs, centralized error envelopes, payload limits, per-client throttling, concurrency guards, and stricter hosted CORS configuration.",
+          zh: "API 请求处理新增 request_id、统一错误结构、请求体大小限制、客户端级限流、并发保护，以及更严格的托管环境 CORS 配置。",
+          tc: "API 請求處理新增 request_id、統一錯誤結構、請求體大小限制、客戶端級限流、併發保護，以及更嚴格的託管環境 CORS 配置。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "Calendar alignment, benchmark series, risk-free series, and OOS policy inputs now use bounded forward-fill rules to reduce future-data leakage risk.",
+          zh: "交易日历对齐、基准序列、无风险利率序列和 OOS 策略输入现在采用有边界的前向填充规则，降低未来数据泄漏风险。",
+          tc: "交易日曆對齊、基準序列、無風險利率序列和 OOS 策略輸入現在採用有邊界的前向填充規則，降低未來資料洩漏風險。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "Crisis Warning diagnostics now show global market scope, required/covered/skipped markets, artifact hash, feature-schema hash, validation status, and degraded validation copy.",
+          zh: "危机预警诊断现在展示全球市场范围、必需/覆盖/跳过市场、模型文件哈希、特征结构哈希、验证状态和降级验证说明。",
+          tc: "危機預警診斷現在展示全球市場範圍、必需/覆蓋/跳過市場、模型檔案雜湊、特徵結構雜湊、驗證狀態和降級驗證說明。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "Hong Kong Alpha attribution is now disabled until HK-local factors are configured, matching the explicit unavailable policy for China A-share, Japan, and Taiwan workflows.",
+          zh: "港股 Alpha 归因在港股本土因子接入前已关闭，并与中国 A 股、日本、台湾流程的明确不可用策略保持一致。",
+          tc: "港股 Alpha 歸因在港股本土因子接入前已關閉，並與中國 A 股、日本、台灣流程的明確不可用策略保持一致。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "Switching markets now resets portfolios, weights, risk controls, model settings, OOS settings, and views to region-specific defaults.",
+          zh: "切换市场时会把组合、权重、风险控制、模型参数、OOS 设置和视图重置为对应市场默认值。",
+          tc: "切換市場時會把組合、權重、風險控制、模型參數、OOS 設定和視圖重置為對應市場預設值。",
+        },
+      },
+      {
+        type: "changed",
+        text: {
+          en: "Mobile and tablet layouts were tightened across the header, market rail, bottom navigation, sidebar, metric cards, correlation heatmap, report actions, and Welcome dashboard.",
+          zh: "移动端和平板布局完成收紧，覆盖顶部栏、市场切换轨道、底部导航、侧边栏、指标卡、相关性热力图、报告操作和欢迎页仪表盘。",
+          tc: "行動端和平板版面完成收緊，覆蓋頂部欄、市場切換軌道、底部導航、側邊欄、指標卡、相關性熱力圖、報告操作和歡迎頁儀表盤。",
+        },
+      },
+      {
+        type: "fixed",
+        text: {
+          en: "Browser presets no longer persist API keys, and saved presets are sanitized before load and save.",
+          zh: "浏览器预设不再持久化 API Key，已保存的预设会在读取与写入前进行净化。",
+          tc: "瀏覽器預設不再持久化 API Key，已儲存的預設會在讀取與寫入前進行淨化。",
+        },
+      },
+    ],
+  },
   {
     version: "V4.1.0",
     date: "2026-05-16",
@@ -726,7 +797,7 @@ const MARKET_PANEL_COPY = {
     sourceWarnings: "Warnings",
     noActiveProvider: "No active provider",
     dataNoticeCount: "Data notices",
-    dataDelayNote: "Market data may be delayed or adjusted by the data provider.",
+    dataDelayNote: "Data may be delayed.",
     trendUnavailable: "Intraday trend is temporarily unavailable.",
     localTime: "Local time",
     asOf: "As of",
@@ -781,7 +852,7 @@ const MARKET_PANEL_COPY = {
     sourceWarnings: "有提示",
     noActiveProvider: "暂无有效来源",
     dataNoticeCount: "数据提示",
-    dataDelayNote: "市场数据可能存在延迟，具体以数据源返回为准。",
+    dataDelayNote: "数据可能延迟",
     trendUnavailable: "当日走势图暂时不可用。",
     localTime: "当地时间",
     asOf: "截至",
@@ -836,7 +907,7 @@ const MARKET_PANEL_COPY = {
     sourceWarnings: "有提示",
     noActiveProvider: "暫無有效來源",
     dataNoticeCount: "資料提示",
-    dataDelayNote: "市場資料可能存在延遲，具體以資料源返回為準。",
+    dataDelayNote: "資料可能延遲",
     trendUnavailable: "當日走勢圖暫時不可用。",
     localTime: "當地時間",
     asOf: "截至",
@@ -882,6 +953,19 @@ function getIndexName(index: MarketSnapshotIndex, lang: Lang): string {
     return index.name_tc;
   }
   return index.name;
+}
+
+function etfProxySuffix(index: MarketSnapshotIndex, lang: Lang): string | null {
+  if (index.symbol !== "TOPIX" && index.symbol !== "JPX400") {
+    return null;
+  }
+  if (lang === "zh") {
+    return "（ETF来源）";
+  }
+  if (lang === "tc") {
+    return "（ETF來源）";
+  }
+  return "(ETF proxy)";
 }
 
 function formatNumber(value: number | null): string {
@@ -1271,13 +1355,21 @@ function DashboardIndexCard({
     .filter((value) => typeof value === "number" && Number.isFinite(value));
   const sourceDetail = index.source_detail || index.source;
   const source = formatProviderAwareSourceLabel(sourceDetail, lang, compactProviderSource);
+  const proxySuffix = etfProxySuffix(index, lang);
 
   return (
-    <article className="glass-card min-h-[232px] p-4">
+    <article className="mobile-index-card glass-card min-h-[232px] p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate text-[15px] font-semibold text-df-text">{getIndexName(index, lang)}</h3>
-          <div className="mt-3 font-mono text-[28px] font-semibold leading-none tracking-normal text-df-text">
+          <div className="flex min-w-0 items-baseline gap-1">
+            <h3 className="min-w-0 truncate text-[15px] font-semibold text-df-text">{getIndexName(index, lang)}</h3>
+            {proxySuffix && (
+              <span className="shrink-0 text-[15px] font-semibold text-df-text-secondary">
+                {proxySuffix}
+              </span>
+            )}
+          </div>
+          <div className="mobile-index-price mt-3 font-mono text-[28px] font-semibold leading-none tracking-normal text-df-text">
             {formatNumber(index.price)}
           </div>
           <div className={`mt-2 font-mono text-base font-semibold ${positive ? "text-emerald-300" : "text-rose-400"}`}>
@@ -1295,7 +1387,7 @@ function DashboardIndexCard({
           </div>
         )}
       </div>
-      <div className="mt-3 flex items-center justify-between gap-3 border-t border-df-border/60 pt-3 text-xs text-df-text-secondary">
+      <div className="mobile-index-meta mt-3 flex items-center justify-between gap-3 border-t border-df-border/60 pt-3 text-xs text-df-text-secondary">
         <span className="shrink-0 whitespace-nowrap font-mono">{index.asof_date || "--"}</span>
         <span className="min-w-0 truncate text-right" title={sourceDetail}>
           {source}
@@ -1406,6 +1498,14 @@ type BreadthSlice = {
   pct: number;
   color: string;
   textClass: string;
+};
+
+type StatusRow = {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  color: string;
+  secondary?: string;
 };
 
 function breadthGradient(slices: BreadthSlice[]): string {
@@ -1596,15 +1696,18 @@ export default function WelcomeTab({
   const brief = useMemo(() => buildMarketBrief(snapshot, lang), [snapshot, lang]);
   const summary = useMemo(() => summarizeIndices(snapshot), [snapshot]);
   const dashboardIndices = snapshot?.indices ?? [];
-  const sourceRows = sourceDistribution(snapshot);
+  const compactProviderSource = market === "jp" || market === "tw";
+  const sourceRows = sourceDistribution(snapshot, compactProviderSource);
   const visibleSourceRows = sourcesExpanded ? sourceRows : sourceRows.slice(0, 1);
   const hiddenSourceCount = Math.max(sourceRows.length - 1, 0);
   const primarySourcePct = sourceRows[0]?.pct ?? 0;
-  const primarySourceLabel = sourceRows[0]?.label ?? panelText(lang, "noActiveProvider");
+  const primarySourceLabel = sourceRows[0]?.displayLabel ?? panelText(lang, "noActiveProvider");
+  const primarySourceTitle = sourceRows[0]?.label ?? primarySourceLabel;
   const sourceHealth = sourceHealthLabel(snapshot, lang);
   const tone = marketToneLabel(summary.average);
   const volatility = volatilityRegimeLabel(snapshot);
   const dailyNotice = snapshot?.data_warnings?.[0] || panelText(lang, "noActiveDataWarnings");
+  const dataDelayNote = panelText(lang, "dataDelayNote");
   const latestUpdated = formatFullHktTimestamp(snapshot?.updated_at);
   const compactUpdated = latestUpdated.replace(" HKT", "");
   const latestQuoteAsOf = latestIndexAsOf(snapshot);
@@ -1616,11 +1719,11 @@ export default function WelcomeTab({
   const sessionStatusText = snapshot
     ? `${MARKET_LABELS[snapshot.market][lang]} ${sessionLabel(snapshot.session_status, lang)}`
     : panelText(lang, "unavailable");
-  const statusRows = [
+  const statusRows: StatusRow[] = [
     { icon: Activity, label: panelText(lang, "sessionStatusLabel"), value: sessionStatusText, color: sessionStatusClass(snapshot?.session_status) },
     { icon: BarChart3, label: panelText(lang, "marketToneLabel"), value: tone.label, color: tone.className },
     { icon: Shield, label: panelText(lang, "volatilityRegimeLabel"), value: volatility.label, color: volatility.className },
-    { icon: AlertTriangle, label: panelText(lang, "dataNoticesLabel"), value: dailyNotice, color: snapshot?.data_warnings?.length ? "text-amber-400" : "text-blue-300" },
+    { icon: AlertTriangle, label: panelText(lang, "dataNoticesLabel"), value: dailyNotice, secondary: dataDelayNote, color: snapshot?.data_warnings?.length ? "text-amber-400" : "text-blue-300" },
     { icon: Clock3, label: panelText(lang, "latestQuoteLabel"), value: latestQuoteAsOf, color: "text-df-text-secondary" },
     { icon: RefreshCw, label: panelText(lang, "backendRefreshed"), value: compactUpdated, color: "text-df-text-secondary" },
   ];
@@ -1629,24 +1732,24 @@ export default function WelcomeTab({
   const downShare = (summary.down / breadthTotal) * 100;
   const flatShare = (summary.flat / breadthTotal) * 100;
   const breadthSlices: BreadthSlice[] = [
-    { key: "up", label: panelText(lang, "breadthUp"), count: summary.up, pct: upShare, color: "#60a5fa", textClass: "text-blue-300" },
-    { key: "down", label: panelText(lang, "breadthDown"), count: summary.down, pct: downShare, color: "#fb7185", textClass: "text-rose-300" },
-    { key: "flat", label: panelText(lang, "breadthFlat"), count: summary.flat, pct: flatShare, color: "#94a3b8", textClass: "text-slate-300" },
+    { key: "up", label: panelText(lang, "breadthUp"), count: summary.up, pct: upShare, color: "#60a5fa", textClass: "text-blue-600 dark:text-blue-300" },
+    { key: "down", label: panelText(lang, "breadthDown"), count: summary.down, pct: downShare, color: "#fb7185", textClass: "text-rose-600 dark:text-rose-300" },
+    { key: "flat", label: panelText(lang, "breadthFlat"), count: summary.flat, pct: flatShare, color: "#94a3b8", textClass: "text-slate-600 dark:text-slate-300" },
   ];
   const breadthBias = breadthSlices.reduce((best, slice) => (slice.count > best.count ? slice : best), breadthSlices[0]);
   const spread = snapshotChangeSpread(snapshot);
 
   return (
-    <div className="space-y-[14px] page-fade-in">
+    <div className="mobile-welcome space-y-[14px] page-fade-in">
       <section>
-        <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-3">
+        <div className="mobile-dashboard-heading mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
             <span className="h-5 w-0.5 rounded bg-df-accent" />
-            <h2 className="text-[20px] font-semibold leading-none text-df-text">Market Snapshot</h2>
-            <span className="text-xs text-df-text-secondary">Real-time overview</span>
+            <h2 className="min-w-0 text-[20px] font-semibold leading-none text-df-text">Market Snapshot</h2>
+            <span className="shrink-0 text-xs text-df-text-secondary">Real-time overview</span>
           </div>
-          <div className="flex items-center gap-3 text-xs text-df-text-secondary">
-            <span>Last updated: {latestUpdated}</span>
+          <div className="mobile-dashboard-update flex items-center gap-3 text-xs text-df-text-secondary">
+            <span className="min-w-0 break-words">Last updated: {latestUpdated}</span>
             <button
               type="button"
               onClick={() => void handleRefresh()}
@@ -1670,6 +1773,7 @@ export default function WelcomeTab({
                   key={index.symbol}
                   index={index}
                   lang={lang}
+                  compactProviderSource={compactProviderSource}
                 />
               ))
             : (
@@ -1693,11 +1797,18 @@ export default function WelcomeTab({
             {statusRows.map((row) => {
               const Icon = row.icon;
               return (
-                <div key={row.label} className="grid min-h-[46px] grid-cols-[23px_88px_minmax(0,1fr)] items-center gap-2 rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-1.5">
+                <div key={row.label} className="mobile-status-row grid min-h-[54px] grid-cols-[23px_88px_minmax(0,1fr)] items-center gap-2 rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-1.5">
                   <Icon size={16} className={row.color} />
                   <span className="truncate text-[11px] font-medium text-df-text-secondary">{row.label}</span>
-                  <span className={`truncate text-[12px] font-semibold ${row.color}`} title={row.value}>
-                    {row.value}
+                  <span className="min-w-0">
+                    <span className={`block truncate text-[12px] font-semibold ${row.color}`} title={row.value}>
+                      {row.value}
+                    </span>
+                    {row.secondary && (
+                      <span className="mt-0.5 block truncate text-[11px] font-medium leading-4 text-df-text-secondary" title={row.secondary}>
+                        {row.secondary}
+                      </span>
+                    )}
                   </span>
                 </div>
               );
@@ -1728,19 +1839,19 @@ export default function WelcomeTab({
           </div>
 
           <div className="flex flex-1 flex-col">
-            <div className="grid flex-1 grid-cols-[116px_minmax(0,1fr)] items-center gap-4">
+            <div className="mobile-breadth-layout grid flex-1 grid-cols-[116px_minmax(0,1fr)] items-center gap-4">
               <BreadthDonut slices={breadthSlices} total={breadthTotal} noDataLabel={panelText(lang, "noBreadthData")} />
               <div className="space-y-2">
                 {breadthSlices.map((slice) => (
                   <div key={slice.key} className="grid grid-cols-[auto_minmax(0,1fr)_2.75rem] items-center gap-2 text-xs">
                     <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: slice.color }} />
-                    <span className="truncate text-df-text-secondary">{slice.label}</span>
+                    <span className="truncate font-medium text-slate-600 dark:text-df-text-secondary">{slice.label}</span>
                     <span className={`text-right font-mono font-semibold ${slice.textClass}`}>
                       {slice.count}/{breadthTotal}
                     </span>
                   </div>
                 ))}
-                <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2 text-xs leading-5 text-df-text-secondary">
+                <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-2.5 py-2 text-xs font-medium leading-5 text-slate-600 dark:text-df-text-secondary">
                   {panelText(lang, "breadthBias")}: <span className={`font-semibold ${breadthBias.textClass}`}>{breadthBias.label}</span>
                 </div>
               </div>
@@ -1795,7 +1906,7 @@ export default function WelcomeTab({
           <div className="flex flex-1 flex-col gap-2.5">
             <div className="rounded-md border border-df-border bg-df-surface-solid/20 px-3 py-2.5">
               <div className="text-[11px] font-medium text-df-text-secondary">{panelText(lang, "primarySource")}</div>
-              <div className="mt-1 truncate text-sm font-semibold text-df-text" title={primarySourceLabel}>
+              <div className="mt-1 truncate text-sm font-semibold text-df-text" title={primarySourceTitle}>
                 {primarySourceLabel}
               </div>
             </div>

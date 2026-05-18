@@ -5,6 +5,7 @@ from datetime import date
 from unittest.mock import AsyncMock, patch
 
 from backend import main as api
+from backend.services import ALPHA_UNSUPPORTED_MARKET_MESSAGES
 from models import (
     CrisisWarningDiagnostics,
     CrisisWarningDriver,
@@ -30,6 +31,8 @@ def make_analysis_result(
     benchmark_symbol = (
         "000300"
         if market == "cn"
+        else "^HSI"
+        if market == "hk"
         else "^N225"
         if market == "jp"
         else "^TWII"
@@ -39,6 +42,8 @@ def make_analysis_result(
     benchmark_name = (
         "CSI 300 Index"
         if market == "cn"
+        else "Hang Seng Index"
+        if market == "hk"
         else "Nikkei 225"
         if market == "jp"
         else "TAIEX"
@@ -222,6 +227,36 @@ class RiskReportApiTests(unittest.TestCase):
         self.assertTrue(any("real factors unavailable" in warning for warning in report.data_warnings))
         self.assertTrue(any("Crisis warning is unavailable" in warning for warning in report.data_warnings))
         self.assertTrue(any("真实因子数据不可用" in note.detail for note in report.methodology_notes))
+
+    def test_hk_report_localizes_alpha_unavailable_warning(self) -> None:
+        payload = api.RiskReportRequest(
+            tickers=["0005.HK", "0007.HK"],
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 5, 1),
+            weights=[0.5, 0.5],
+            market="hk",
+            risk_free_rate=0.0,
+            use_market_cap_prior=False,
+        )
+        analysis_result = make_analysis_result(
+            tickers=["0005.HK", "0007.HK"],
+            market="hk",
+            alpha_status="unavailable",
+            alpha_message=ALPHA_UNSUPPORTED_MARKET_MESSAGES["hk"],
+        )
+
+        with patch.object(
+            api.analysis_service,
+            "run_analysis",
+            new=AsyncMock(return_value=analysis_result),
+        ):
+            report = asyncio.run(api.generate_risk_report(payload))
+
+        notes_text = " ".join(note.detail for note in report.methodology_notes)
+        self.assertIn("港股本土因子", notes_text)
+        self.assertNotIn("HK-local factors", notes_text)
+        self.assertEqual(report.portfolio_overview.currency, "HKD")
+        self.assertEqual(report.decision_summary.benchmark_symbol, "^HSI")
 
     def test_cn_report_includes_required_methodology_notes(self) -> None:
         payload = api.RiskReportRequest(

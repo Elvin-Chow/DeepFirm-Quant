@@ -1,24 +1,192 @@
 {
+  "artifact_hash": "b807acefbc0c5774844331b7514791fd892f33a59846250728a64ca55506d6cd",
+  "artifact_hash_algorithm": "sha256",
+  "artifact_hash_files": [
+    {
+      "path": "xgb_crisis_model.json",
+      "sha256": "1d79b25ac9afe9a3eb1cc76356abd1810462db5c7dad75f73e5bee70150d9506",
+      "status": "present"
+    },
+    {
+      "path": "calibration.json",
+      "sha256": "390629a049ba671de95737fd31f2d98e2e02e0e448f8ec02605bcac9c12edf73",
+      "status": "present"
+    },
+    {
+      "path": "feature_schema.json",
+      "sha256": "47b23430fb89b4626436b0e9dd3f14017183473c4af2450b25601fd935512ece",
+      "status": "present"
+    },
+    {
+      "path": "shap_background_sample.csv",
+      "sha256": "42f09219f1fdc8ae8b4b5d95e5998230cf9057d3759d9e5295bd2cee45daa397",
+      "status": "present"
+    }
+  ],
+  "covered_market_scope": [
+    "us",
+    "hk",
+    "cn",
+    "jp",
+    "tw"
+  ],
+  "covered_training_markets": [
+    "us",
+    "hk",
+    "cn",
+    "jp",
+    "tw"
+  ],
   "dependencies": {
     "numpy": "2.4.4",
     "pandas": "3.0.2",
     "xgboost": "3.2.0"
   },
-  "domain_portfolio_count": 5,
+  "domain_coverage_status": "complete",
+  "domain_market_coverage": {
+    "cn": {
+      "defined_portfolio_count": 4,
+      "missing_requirements": [],
+      "portfolio_count": 4,
+      "positive_events": 354,
+      "skipped_portfolio_count": 0,
+      "skipped_portfolios": [],
+      "status": "complete",
+      "training_end": "2026-04-29",
+      "training_rows": 7101,
+      "training_start": "2018-04-04",
+      "training_window_days": 2947,
+      "validation_positive_events": 69
+    },
+    "hk": {
+      "defined_portfolio_count": 4,
+      "missing_requirements": [],
+      "portfolio_count": 4,
+      "positive_events": 302,
+      "skipped_portfolio_count": 0,
+      "skipped_portfolios": [],
+      "status": "complete",
+      "training_end": "2026-04-29",
+      "training_rows": 5920,
+      "training_start": "2018-04-03",
+      "training_window_days": 2948,
+      "validation_positive_events": 67
+    },
+    "jp": {
+      "defined_portfolio_count": 4,
+      "missing_requirements": [],
+      "portfolio_count": 4,
+      "positive_events": 436,
+      "skipped_portfolio_count": 0,
+      "skipped_portfolios": [],
+      "status": "complete",
+      "training_end": "2026-04-30",
+      "training_rows": 7875,
+      "training_start": "2018-04-04",
+      "training_window_days": 2948,
+      "validation_positive_events": 83
+    },
+    "tw": {
+      "defined_portfolio_count": 4,
+      "missing_requirements": [],
+      "portfolio_count": 4,
+      "positive_events": 443,
+      "skipped_portfolio_count": 0,
+      "skipped_portfolios": [],
+      "status": "complete",
+      "training_end": "2026-04-29",
+      "training_rows": 7825,
+      "training_start": "2018-04-11",
+      "training_window_days": 2940,
+      "validation_positive_events": 82
+    },
+    "us": {
+      "defined_portfolio_count": 4,
+      "missing_requirements": [],
+      "portfolio_count": 4,
+      "positive_events": 406,
+      "skipped_portfolio_count": 0,
+      "skipped_portfolios": [],
+      "status": "complete",
+      "training_end": "2026-04-30",
+      "training_rows": 8128,
+      "training_start": "2018-04-02",
+      "training_window_days": 2950,
+      "validation_positive_events": 82
+    }
+  },
+  "domain_market_requirements": {
+    "cn": {
+      "portfolio_count": 4,
+      "positive_events": 40,
+      "training_rows": 480,
+      "training_window_days": 1825,
+      "validation_positive_events": 50
+    },
+    "hk": {
+      "portfolio_count": 4,
+      "positive_events": 40,
+      "training_rows": 480,
+      "training_window_days": 1825,
+      "validation_positive_events": 50
+    },
+    "jp": {
+      "portfolio_count": 4,
+      "positive_events": 40,
+      "training_rows": 480,
+      "training_window_days": 1825,
+      "validation_positive_events": 50
+    },
+    "tw": {
+      "portfolio_count": 4,
+      "positive_events": 40,
+      "training_rows": 480,
+      "training_window_days": 1825,
+      "validation_positive_events": 50
+    },
+    "us": {
+      "portfolio_count": 4,
+      "positive_events": 40,
+      "training_rows": 480,
+      "training_window_days": 1825,
+      "validation_positive_events": 50
+    }
+  },
+  "domain_portfolio_count": 20,
   "domain_portfolios": [
     {
       "market": "us",
       "n_observations": 2094,
       "n_training_rows": 2032,
-      "name": "us_growth",
-      "positive_events": 109,
-      "positive_rate": 0.05364173228346457,
+      "name": "us_index_beta",
+      "positive_events": 104,
+      "positive_rate": 0.051181102362204724,
+      "tickers": [
+        "SPY",
+        "QQQ",
+        "IWM"
+      ],
+      "training_end": "2026-04-30",
+      "training_start": "2018-04-02",
+      "weights": [
+        0.5,
+        0.3,
+        0.2
+      ]
+    },
+    {
+      "market": "us",
+      "n_observations": 2094,
+      "n_training_rows": 2032,
+      "name": "us_mega_cap_growth",
+      "positive_events": 104,
+      "positive_rate": 0.051181102362204724,
       "tickers": [
         "AAPL",
         "MSFT",
         "NVDA",
-        "GOOG",
-        "TSM"
+        "AMZN",
+        "GOOGL"
       ],
       "training_end": "2026-04-30",
       "training_start": "2018-04-02",
@@ -34,36 +202,36 @@
       "market": "us",
       "n_observations": 2094,
       "n_training_rows": 2032,
-      "name": "us_cross_asset",
-      "positive_events": 117,
-      "positive_rate": 0.05757874015748032,
+      "name": "us_sector_rotation",
+      "positive_events": 92,
+      "positive_rate": 0.045275590551181105,
       "tickers": [
-        "SPY",
-        "QQQ",
-        "GLD",
-        "SLV"
+        "XLK",
+        "XLF",
+        "XLV",
+        "XLE"
       ],
       "training_end": "2026-04-30",
       "training_start": "2018-04-02",
       "weights": [
-        0.4,
         0.25,
-        0.2,
-        0.15
+        0.25,
+        0.25,
+        0.25
       ]
     },
     {
       "market": "us",
       "n_observations": 2094,
       "n_training_rows": 2032,
-      "name": "us_defensive_value",
-      "positive_events": 109,
-      "positive_rate": 0.05364173228346457,
+      "name": "us_defensive_quality",
+      "positive_events": 106,
+      "positive_rate": 0.05216535433070866,
       "tickers": [
-        "PG",
+        "XLP",
         "COST",
-        "JPM",
-        "BRK-B"
+        "PG",
+        "JNJ"
       ],
       "training_end": "2026-04-30",
       "training_start": "2018-04-02",
@@ -76,18 +244,104 @@
     },
     {
       "market": "hk",
-      "n_observations": 2047,
-      "n_training_rows": 1985,
-      "name": "hk_large_cap",
-      "positive_events": 96,
-      "positive_rate": 0.04836272040302267,
+      "n_observations": 495,
+      "n_training_rows": 433,
+      "name": "hk_index_beta",
+      "positive_events": 18,
+      "positive_rate": 0.04157043879907621,
       "tickers": [
         "02800.HK",
+        "02828.HK",
+        "03033.HK"
+      ],
+      "training_end": "2026-04-29",
+      "training_start": "2024-07-24",
+      "weights": [
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333
+      ]
+    },
+    {
+      "market": "hk",
+      "n_observations": 1579,
+      "n_training_rows": 1517,
+      "name": "hk_large_cap_platforms",
+      "positive_events": 72,
+      "positive_rate": 0.047462096242584045,
+      "tickers": [
+        "0700.HK",
+        "9988.HK",
+        "3690.HK",
+        "1299.HK"
+      ],
+      "training_end": "2026-04-29",
+      "training_start": "2020-02-26",
+      "weights": [
+        0.25,
+        0.25,
+        0.25,
+        0.25
+      ]
+    },
+    {
+      "market": "hk",
+      "n_observations": 2047,
+      "n_training_rows": 1985,
+      "name": "hk_financial_property",
+      "positive_events": 102,
+      "positive_rate": 0.05138539042821159,
+      "tickers": [
         "0005.HK",
-        "03988.HK"
+        "0388.HK",
+        "0016.HK",
+        "0823.HK"
       ],
       "training_end": "2026-04-29",
       "training_start": "2018-04-03",
+      "weights": [
+        0.25,
+        0.25,
+        0.25,
+        0.25
+      ]
+    },
+    {
+      "market": "hk",
+      "n_observations": 2047,
+      "n_training_rows": 1985,
+      "name": "hk_defensive_yield",
+      "positive_events": 110,
+      "positive_rate": 0.055415617128463476,
+      "tickers": [
+        "0002.HK",
+        "0003.HK",
+        "1038.HK",
+        "2638.HK"
+      ],
+      "training_end": "2026-04-29",
+      "training_start": "2018-04-03",
+      "weights": [
+        0.25,
+        0.25,
+        0.25,
+        0.25
+      ]
+    },
+    {
+      "market": "cn",
+      "n_observations": 2016,
+      "n_training_rows": 1954,
+      "name": "cn_index_beta",
+      "positive_events": 104,
+      "positive_rate": 0.05322415557830092,
+      "tickers": [
+        "510300",
+        "510050",
+        "510500"
+      ],
+      "training_end": "2026-04-29",
+      "training_start": "2018-04-04",
       "weights": [
         0.3333333333333333,
         0.3333333333333333,
@@ -98,14 +352,14 @@
       "market": "cn",
       "n_observations": 1912,
       "n_training_rows": 1850,
-      "name": "cn_large_cap",
-      "positive_events": 84,
-      "positive_rate": 0.04540540540540541,
+      "name": "cn_large_cap_core",
+      "positive_events": 86,
+      "positive_rate": 0.046486486486486484,
       "tickers": [
         "600519",
         "300750",
-        "000001",
-        "601988"
+        "601318",
+        "600036"
       ],
       "training_end": "2026-04-29",
       "training_start": "2018-09-05",
@@ -115,35 +369,336 @@
         0.25,
         0.25
       ]
+    },
+    {
+      "market": "cn",
+      "n_observations": 1404,
+      "n_training_rows": 1342,
+      "name": "cn_sector_growth",
+      "positive_events": 72,
+      "positive_rate": 0.05365126676602087,
+      "tickers": [
+        "002594",
+        "300760",
+        "688981",
+        "300124"
+      ],
+      "training_end": "2026-04-29",
+      "training_start": "2020-10-19",
+      "weights": [
+        0.25,
+        0.25,
+        0.25,
+        0.25
+      ]
+    },
+    {
+      "market": "cn",
+      "n_observations": 2017,
+      "n_training_rows": 1955,
+      "name": "cn_defensive_value",
+      "positive_events": 92,
+      "positive_rate": 0.047058823529411764,
+      "tickers": [
+        "600900",
+        "601398",
+        "600276",
+        "000333"
+      ],
+      "training_end": "2026-04-29",
+      "training_start": "2018-04-04",
+      "weights": [
+        0.25,
+        0.25,
+        0.25,
+        0.25
+      ]
+    },
+    {
+      "market": "jp",
+      "n_observations": 2030,
+      "n_training_rows": 1968,
+      "name": "jp_index_beta",
+      "positive_events": 109,
+      "positive_rate": 0.05538617886178862,
+      "tickers": [
+        "1321.T",
+        "1306.T",
+        "1348.T"
+      ],
+      "training_end": "2026-04-30",
+      "training_start": "2018-04-04",
+      "weights": [
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333
+      ]
+    },
+    {
+      "market": "jp",
+      "n_observations": 2031,
+      "n_training_rows": 1969,
+      "name": "jp_large_cap_core",
+      "positive_events": 110,
+      "positive_rate": 0.055865921787709494,
+      "tickers": [
+        "7203.T",
+        "6758.T",
+        "9984.T",
+        "6861.T",
+        "8306.T"
+      ],
+      "training_end": "2026-04-30",
+      "training_start": "2018-04-04",
+      "weights": [
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ]
+    },
+    {
+      "market": "jp",
+      "n_observations": 2031,
+      "n_training_rows": 1969,
+      "name": "jp_exporter_industrials",
+      "positive_events": 116,
+      "positive_rate": 0.05891315388522093,
+      "tickers": [
+        "7203.T",
+        "7267.T",
+        "8035.T",
+        "6954.T",
+        "6501.T"
+      ],
+      "training_end": "2026-04-30",
+      "training_start": "2018-04-04",
+      "weights": [
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ]
+    },
+    {
+      "market": "jp",
+      "n_observations": 2031,
+      "n_training_rows": 1969,
+      "name": "jp_defensive_value",
+      "positive_events": 101,
+      "positive_rate": 0.051295073641442354,
+      "tickers": [
+        "9432.T",
+        "4502.T",
+        "3382.T",
+        "2914.T"
+      ],
+      "training_end": "2026-04-30",
+      "training_start": "2018-04-04",
+      "weights": [
+        0.25,
+        0.25,
+        0.25,
+        0.25
+      ]
+    },
+    {
+      "market": "tw",
+      "n_observations": 2019,
+      "n_training_rows": 1957,
+      "name": "tw_index_beta",
+      "positive_events": 112,
+      "positive_rate": 0.057230454777721,
+      "tickers": [
+        "0050.TW",
+        "006208.TW",
+        "0056.TW"
+      ],
+      "training_end": "2026-04-29",
+      "training_start": "2018-04-11",
+      "weights": [
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333
+      ]
+    },
+    {
+      "market": "tw",
+      "n_observations": 2018,
+      "n_training_rows": 1956,
+      "name": "tw_large_cap_core",
+      "positive_events": 106,
+      "positive_rate": 0.0541922290388548,
+      "tickers": [
+        "2330.TW",
+        "2317.TW",
+        "2454.TW",
+        "2308.TW",
+        "2881.TW"
+      ],
+      "training_end": "2026-04-29",
+      "training_start": "2018-04-11",
+      "weights": [
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ]
+    },
+    {
+      "market": "tw",
+      "n_observations": 2018,
+      "n_training_rows": 1956,
+      "name": "tw_semiconductor_chain",
+      "positive_events": 115,
+      "positive_rate": 0.058793456032719835,
+      "tickers": [
+        "2330.TW",
+        "2454.TW",
+        "2303.TW",
+        "3711.TW",
+        "3034.TW"
+      ],
+      "training_end": "2026-04-29",
+      "training_start": "2018-04-11",
+      "weights": [
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ]
+    },
+    {
+      "market": "tw",
+      "n_observations": 2018,
+      "n_training_rows": 1956,
+      "name": "tw_defensive_income",
+      "positive_events": 110,
+      "positive_rate": 0.05623721881390593,
+      "tickers": [
+        "2412.TW",
+        "1303.TW",
+        "1216.TW",
+        "3045.TW",
+        "2886.TW"
+      ],
+      "training_end": "2026-04-29",
+      "training_start": "2018-04-11",
+      "weights": [
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ]
     }
   ],
-  "model_health": "ok",
+  "feature_schema_hash": "47b23430fb89b4626436b0e9dd3f14017183473c4af2450b25601fd935512ece",
+  "global_domain_complete": true,
+  "incomplete_training_markets": [],
+  "is_global_complete": true,
+  "missing_training_markets": [],
+  "model_health": "degraded",
   "model_name": "XGBClassifier",
-  "model_version": "crisis-warning-xgb-h1-2026-05-09",
-  "n_observations": 10241,
-  "n_training_rows": 9931,
-  "positive_events": 515,
-  "positive_rate": 0.05185781895076025,
+  "model_version": "crisis-warning-xgb-h1-2026-05-17",
+  "n_observations": 38089,
+  "n_training_rows": 36849,
+  "per_market_summary": [
+    {
+      "market": "us",
+      "n_observations": 8376,
+      "n_training_rows": 8128,
+      "portfolio_count": 4,
+      "positive_events": 406,
+      "positive_rate": 0.049950787401574805,
+      "training_end": "2026-04-30",
+      "training_start": "2018-04-02"
+    },
+    {
+      "market": "hk",
+      "n_observations": 6168,
+      "n_training_rows": 5920,
+      "portfolio_count": 4,
+      "positive_events": 302,
+      "positive_rate": 0.05101351351351351,
+      "training_end": "2026-04-29",
+      "training_start": "2018-04-03"
+    },
+    {
+      "market": "cn",
+      "n_observations": 7349,
+      "n_training_rows": 7101,
+      "portfolio_count": 4,
+      "positive_events": 354,
+      "positive_rate": 0.04985213350232361,
+      "training_end": "2026-04-29",
+      "training_start": "2018-04-04"
+    },
+    {
+      "market": "jp",
+      "n_observations": 8123,
+      "n_training_rows": 7875,
+      "portfolio_count": 4,
+      "positive_events": 436,
+      "positive_rate": 0.05536507936507937,
+      "training_end": "2026-04-30",
+      "training_start": "2018-04-04"
+    },
+    {
+      "market": "tw",
+      "n_observations": 8073,
+      "n_training_rows": 7825,
+      "portfolio_count": 4,
+      "positive_events": 443,
+      "positive_rate": 0.056613418530351435,
+      "training_end": "2026-04-29",
+      "training_start": "2018-04-11"
+    }
+  ],
+  "positive_events": 1941,
+  "positive_rate": 0.05267442807131808,
   "probability_calibrated": true,
+  "required_market_scope": [
+    "us",
+    "hk",
+    "cn",
+    "jp",
+    "tw"
+  ],
+  "required_training_markets": [
+    "us",
+    "hk",
+    "cn",
+    "jp",
+    "tw"
+  ],
   "skipped_domain_portfolios": [],
+  "skipped_market_scope": [],
   "target_definition": "Future 1D portfolio log return below trailing 5% historical 1D return threshold.",
-  "trained_at": "2026-05-09T11:01:15+00:00",
+  "trained_at": "2026-05-17T07:43:01+00:00",
   "training_domain": "diversified_global",
   "training_end": "2026-04-30",
-  "training_market_scope": "cn,hk,us",
+  "training_market_scope": "cn,hk,jp,tw,us",
   "training_start": "2018-04-02",
   "validation_metrics": {
-    "brier_score": 0.18522822856903076,
-    "calibrated_brier_score": 0.04516999423503876,
-    "calibrated_log_loss": 0.1888486959235909,
-    "calibration_error": 0.3461872275954344,
-    "log_loss": 0.55350981559757,
-    "positive_rate": 0.04831404126824358,
-    "pr_auc": 0.07805503529353215,
-    "precision_at_0_60": 0.07009345794392523,
-    "recall_at_0_60": 0.15625,
-    "roc_auc": 0.5528710558787239,
-    "validation_positive_events": 96.0
+    "brier_score": 0.21124696731567383,
+    "calibrated_brier_score": 0.04823486112500827,
+    "calibrated_log_loss": 0.19761830578681255,
+    "calibration_error": 0.39284048133012883,
+    "log_loss": 0.6141493062469721,
+    "positive_rate": 0.0519674355495251,
+    "pr_auc": 0.0963301945334282,
+    "precision_at_0_60": 0.10476190476190476,
+    "recall_at_0_60": 0.2010443864229765,
+    "roc_auc": 0.6111549573041467,
+    "validation_positive_events": 383.0
   },
-  "warnings": []
+  "validation_status": "degraded_validation",
+  "warnings": [
+    "Crisis warning raw probability calibration error is elevated."
+  ]
 }

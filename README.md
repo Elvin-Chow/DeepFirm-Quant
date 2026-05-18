@@ -1,19 +1,24 @@
----
-title: DeepFirm Quant API
-sdk: docker
-app_port: 7860
----
-
 # DeepFirm Quant
 
 ![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 [![CI](https://github.com/Elvin-Chow/DeepFirm-Quant/actions/workflows/ci.yml/badge.svg)](https://github.com/Elvin-Chow/DeepFirm-Quant/actions/workflows/ci.yml)
 ![Status](https://img.shields.io/badge/status-active_development-orange)
+![Backend](https://img.shields.io/badge/backend-FastAPI-009688)
+![Frontend](https://img.shields.io/badge/frontend-Next.js_16-black)
 
-An industrial-grade quantitative risk, machine-learning intelligence, alpha attribution, and Bayesian portfolio decision engine.
+**DeepFirm Quant** is a stateless quantitative risk and portfolio-decision system for multi-market equity workflows.
 
-Designed for data science rigor, DeepFirm Quant combines quantitative risk analytics, machine-learning risk forecasting, anomaly and regime detection, factor attribution, out-of-sample validation, and adaptive Bayesian allocation into one stateless decision system.
+It combines market-data provenance, traditional tail-risk analytics, machine-learning risk intelligence, explainable crisis warnings, factor attribution, out-of-sample validation, and adaptive Bayesian allocation into one production-oriented research stack.
+
+## What It Does
+
+- **Risk:** Historical ES, Monte Carlo ES, drawdown, volatility, correlation, and benchmark comparison.
+- **ML intelligence:** Short-horizon VaR/ES forecasting, anomaly detection, and market-regime classification.
+- **Crisis warning:** XGBoost tail-event probability with SHAP-style driver attribution and artifact validation metadata.
+- **Alpha attribution:** Fama-French factor regression where supported, with explicit unavailable policies for unsupported markets.
+- **Decision:** Black-Litterman allocation with Smart and Professional control modes plus OOS-aware recommendation guardrails.
+- **Markets:** US, Hong Kong, China A-share, Japan, and Taiwan standalone portfolio modes.
 
 ## Core Methodologies
 
@@ -29,7 +34,7 @@ Unlike standard static screeners, this system is driven by adaptive quantitative
 
 ## Tech Stack & Architecture
 
-- **Frontend:** Next.js 14, React 18, TypeScript, Tailwind CSS, Recharts
+- **Frontend:** Next.js 16, React 18, TypeScript, Tailwind CSS, Recharts
 - **Backend:** FastAPI, Pydantic V2 (Stateless REST API)
 - **Compute Engine:** NumPy, Pandas, SciPy, Statsmodels, scikit-learn, XGBoost, SHAP
 - **Data Pipeline:** yfinance (Primary), Tiingo (Fallback), AKShare (Macro/A-shares)
@@ -99,8 +104,9 @@ Visit `http://localhost:3000` in your browser after the development server start
 ## Hosted Deployment
 
 - Vercel frontend: set `NEXT_PUBLIC_API_BASE_URL` to the hosted Hugging Face Space API URL, without a trailing slash.
-- Hugging Face backend: set `ALLOW_ORIGINS` to the production Vercel URL and any trusted preview/custom domains when a strict allow-list is required.
-- If `ALLOW_ORIGINS` is omitted, the API accepts local development origins, Vercel preview/production domains under `https://*.vercel.app`, and Hugging Face Space domains under `https://*.hf.space`.
+- Hugging Face backend: set `ALLOW_ORIGINS` to the production Vercel URL and any trusted preview/custom domains.
+- Hugging Face Space metadata, when needed, should be configured in the Space README rather than the GitHub landing README. The backend Docker Space uses `sdk: docker` and `app_port: 7860`.
+- Hosted environments fail startup when `ALLOW_ORIGINS` is omitted. Local development keeps localhost origins and the Vercel/Hugging Face preview regex for convenience.
 
 ## Usage Workflow
 
@@ -164,7 +170,16 @@ The crisis warning module is an independent, stateless inference layer exposed t
 - It uses the same point-in-time feature frame as the ML risk module and defines labels with future horizon returns against a shifted trailing tail threshold to avoid look-ahead leakage.
 - It loads offline artifacts from `artifacts/crisis_warning/global_h1/` or `artifacts/crisis_warning/global_h5/`.
 - Required artifact files are `xgb_crisis_model.json`, `feature_schema.json`, and `training_metadata.json`; `shap_background_sample.csv` enables higher-quality SHAP explanations, while `calibration.json` is optional.
+- Artifact metadata must expose the real training market scope, required market scope, covered market scope, skipped market scope, global completeness, core artifact hash, feature schema hash, and validation status.
 - Missing artifacts do not block FastAPI startup. The standalone crisis endpoint returns `503` when the requested horizon artifact is unavailable, and the unified analysis response returns `crisis_warning: null`.
+
+Artifact metadata contract:
+
+- Required global market scope: `us,hk,cn,jp,tw`.
+- `training_metadata.json` must include `training_market_scope`, `required_market_scope`, `covered_market_scope`, `skipped_market_scope`, `is_global_complete`, `artifact_hash`, `feature_schema_hash`, and `validation_status`.
+- `artifact_hash` is the SHA-256 digest of the core model artifact files, and `feature_schema_hash` is the SHA-256 digest of `feature_schema.json`.
+- `validation_status` must be one of `ok`, `partial_market_coverage`, or `degraded_validation`.
+- `training_market_scope` records the markets that actually contributed training rows. `required_market_scope`, `covered_market_scope`, and `skipped_market_scope` define whether the artifact is a complete global artifact.
 
 Train a single-portfolio artifact locally from the repository root:
 
@@ -186,7 +201,7 @@ Train a diversified global-domain artifact:
 PYTHONPATH=. .venv/bin/python scripts/train_crisis_warning_model.py \
   --domain-preset diversified_global \
   --allow-domain-partial false \
-  --min-domain-portfolios 5 \
+  --min-domain-portfolios 20 \
   --start-date 2018-01-01 \
   --end-date 2026-05-01 \
   --horizon 5 \
@@ -194,7 +209,17 @@ PYTHONPATH=. .venv/bin/python scripts/train_crisis_warning_model.py \
   --output-dir artifacts/crisis_warning/global_h5
 ```
 
-The diversified preset trains across US growth, US cross-asset, US defensive/value, HK large-cap, CN large-cap, JP large-cap, and TW large-cap portfolios. Each portfolio builds labels independently before rows are combined, preserving the shifted trailing threshold used to prevent look-ahead leakage.
+The diversified preset trains across US, HK, CN, JP, and TW sleeves. Each market includes index beta, large-cap/core, sector or growth exposure, and defensive or style exposure portfolios:
+
+- US: index beta, mega-cap growth, sector rotation, and defensive quality.
+- HK: index beta, large-cap platforms, financial/property, and defensive yield.
+- CN: index beta, large-cap core, sector growth, and defensive value.
+- JP: index beta, large-cap core, exporter/industrials, and defensive value.
+- TW: index beta, large-cap core, semiconductor chain, and defensive income.
+
+Each required market must meet at least 4 usable portfolios, 480 training rows, 40 positive tail events, 3 validation positive events, and a 5-year training window for the diversified artifact to be marked as complete. With `--allow-domain-partial false`, any failed portfolio fetch or unmet required-market gate fails training. With `--allow-domain-partial true`, failed portfolios are written to `skipped_domain_portfolios`, and the artifact metadata is marked with `domain_coverage_status: partial` and `global_domain_complete: false`.
+
+Each portfolio builds labels independently before rows are combined, preserving the shifted trailing threshold used to prevent look-ahead leakage.
 
 The output is a risk warning and model explanation, not an investment recommendation, return forecast, or guarantee of predictive accuracy.
 

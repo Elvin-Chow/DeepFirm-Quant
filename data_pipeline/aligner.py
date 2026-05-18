@@ -38,6 +38,7 @@ class AlignmentResponse(BaseModel):
     common_days: List[str]
     dropped_days_left: int
     dropped_days_right: int
+    coverage_warnings: List[str] = Field(default_factory=list)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -45,8 +46,41 @@ class AlignmentResponse(BaseModel):
 class MarketAligner:
     """Align financial time series using official exchange calendars."""
 
+    PRICE_FORWARD_FILL_LIMIT = 1
+
     def __init__(self) -> None:
         self._supported_markets = {"NYSE", "HKEX", "SSE", "JPX", "XTAI"}
+
+    @classmethod
+    def _bounded_forward_fill(cls, series: pd.Series) -> tuple[pd.Series, int, int]:
+        observed_days = int(series.notna().sum())
+        filled = series.ffill(limit=cls.PRICE_FORWARD_FILL_LIMIT)
+        filled_days = max(int(filled.notna().sum()) - observed_days, 0)
+        return filled, observed_days, filled_days
+
+    @classmethod
+    def _coverage_warning(
+        cls,
+        label: str,
+        total_days: int,
+        observed_days: int,
+        filled_days: int,
+        retained_days: int,
+    ) -> str:
+        if total_days <= 0:
+            return ""
+        if observed_days == total_days and filled_days == 0 and retained_days == total_days:
+            return ""
+
+        observed_ratio = observed_days / total_days
+        retained_ratio = retained_days / total_days
+        return (
+            f"{label} coverage warning: observed {observed_days}/{total_days} "
+            f"aligned dates ({observed_ratio:.1%}), forward-filled {filled_days} "
+            f"with limit {cls.PRICE_FORWARD_FILL_LIMIT}, retained "
+            f"{retained_days}/{total_days} paired dates ({retained_ratio:.1%}) "
+            "after residual gaps."
+        )
 
     def _normalize_index(self, series: pd.Series) -> pd.Series:
         """Strip timezone and truncate to date-level precision."""
@@ -84,12 +118,8 @@ class MarketAligner:
         right_start = right.index.min().date()
         right_end = right.index.max().date()
 
-        left_trading_days = self._get_trading_days(
-            request.left_market, left_start, left_end
-        )
-        right_trading_days = self._get_trading_days(
-            request.right_market, right_start, right_end
-        )
+        left_trading_days = self._get_trading_days(request.left_market, left_start, left_end)
+        right_trading_days = self._get_trading_days(request.right_market, right_start, right_end)
 
         left_valid = left.index.intersection(left_trading_days)
         right_valid = right.index.intersection(right_trading_days)
@@ -104,16 +134,40 @@ class MarketAligner:
         left_aligned = left.loc[common_days]
         right_aligned = right.loc[common_days]
 
-        if left_aligned.isna().any():
-            left_aligned = left_aligned.ffill().bfill()
-        if right_aligned.isna().any():
-            right_aligned = right_aligned.ffill().bfill()
-
-        if left_aligned.isna().any() or right_aligned.isna().any():
+        left_aligned, left_observed, left_filled = self._bounded_forward_fill(left_aligned)
+        right_aligned, right_observed, right_filled = self._bounded_forward_fill(right_aligned)
+        valid_mask = left_aligned.notna() & right_aligned.notna()
+        retained_days = int(valid_mask.sum())
+        if retained_days == 0:
             raise AlignmentError(
-                message="NaN values detected after alignment; data source may be incomplete",
+                message=("no usable aligned observations after bounded forward fill; " "data source may be incomplete"),
                 market=f"{request.left_market} vs {request.right_market}",
             )
+
+        common_days = pd.DatetimeIndex(valid_mask[valid_mask].index)
+        left_aligned = left_aligned.loc[common_days]
+        right_aligned = right_aligned.loc[common_days]
+
+        coverage_warnings = [
+            warning
+            for warning in [
+                self._coverage_warning(
+                    "Left series",
+                    len(valid_mask),
+                    left_observed,
+                    left_filled,
+                    retained_days,
+                ),
+                self._coverage_warning(
+                    "Right series",
+                    len(valid_mask),
+                    right_observed,
+                    right_filled,
+                    retained_days,
+                ),
+            ]
+            if warning
+        ]
 
         return AlignmentResponse(
             left_aligned=left_aligned,
@@ -121,6 +175,7 @@ class MarketAligner:
             common_days=common_days.strftime("%Y-%m-%d").tolist(),
             dropped_days_left=len(left) - len(left_aligned),
             dropped_days_right=len(right) - len(right_aligned),
+            coverage_warnings=coverage_warnings,
         )
 
     def align_multiple(
@@ -160,22 +215,44 @@ class MarketAligner:
             )
 
         aligned_frames: List[pd.DataFrame] = []
-        for series in series_list:
+        coverage_stats: List[tuple[str, int, int, int]] = []
+        for idx, series in enumerate(series_list):
             series = self._normalize_index(series)
             aligned = series.loc[common_days]
-            if aligned.isna().any():
-                aligned = aligned.ffill().bfill()
-            if aligned.isna().any():
-                raise AlignmentError(
-                    message="NaN values detected in final multi-market alignment",
-                )
+            aligned, observed_days, filled_days = self._bounded_forward_fill(aligned)
+            label = str(series.name or f"Series {idx + 1}")
+            coverage_stats.append((label, len(aligned), observed_days, filled_days))
             aligned_frames.append(aligned.to_frame())
 
         result = pd.concat(aligned_frames, axis=1)
+        valid_mask = ~result.isna().any(axis=1)
+        retained_days = int(valid_mask.sum())
+        if retained_days == 0:
+            raise AlignmentError(
+                message=("no usable rows in final multi-market alignment after bounded " "forward fill"),
+            )
+        result = result.loc[valid_mask]
 
         if result.isna().any().any():
             raise AlignmentError(
                 message="NaN values detected in final multi-market alignment",
             )
+
+        coverage_warnings = [
+            warning
+            for label, total_days, observed_days, filled_days in coverage_stats
+            for warning in [
+                self._coverage_warning(
+                    label,
+                    total_days,
+                    observed_days,
+                    filled_days,
+                    retained_days,
+                )
+            ]
+            if warning
+        ]
+        if coverage_warnings:
+            result.attrs["coverage_warnings"] = coverage_warnings
 
         return result

@@ -130,7 +130,7 @@ function SummaryCard({
           {label}
         </div>
       </div>
-      <div className={`mt-3 truncate text-4xl font-bold leading-none ${toneText[tone]} ${mono ? "font-mono" : ""}`}>
+      <div className={`mobile-summary-value mt-3 truncate text-4xl font-bold leading-none ${toneText[tone]} ${mono ? "font-mono" : ""}`}>
         {value}
       </div>
       <div className="mt-2 min-h-[1rem] truncate text-sm text-df-text-secondary">

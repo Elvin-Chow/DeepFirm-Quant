@@ -4,7 +4,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from models import MLRiskForecastResult, MarketRegimeResult, RiskAnomalyResult
+from models import MLRiskForecastResult, MLModelDiagnostics, MarketRegimeResult, RiskAnomalyResult
 from models.allocation_policy import AllocationPolicyEngine
 
 
@@ -189,6 +189,64 @@ class AllocationPolicyEngineTests(unittest.TestCase):
         self.assertEqual(result.risk_level, "High")
         self.assertEqual(result.regime, "High Volatility")
         self.assertEqual(result.anomaly_impact, "tighten_constraints")
+
+    def test_oos_guard_rejects_signal_asof_after_policy_asof(self) -> None:
+        prices = self._prices_from_returns(self._low_risk_returns())
+
+        def diagnostics(asof_date: str) -> MLModelDiagnostics:
+            return MLModelDiagnostics(
+                model_name="test",
+                model_version="test",
+                asof_date=asof_date,
+                confidence=0.8,
+            )
+
+        invalid_signals = {
+            "ml_result": MLRiskForecastResult(
+                ml_var=0.02,
+                ml_es=0.03,
+                risk_score=80,
+                risk_level="High",
+                model_name="test",
+                horizon=5,
+                confidence_level=0.95,
+                diagnostics=diagnostics("2025-10-01"),
+            ),
+            "regime_result": MarketRegimeResult(
+                current_regime="Crisis",
+                smoothed_regime="Crisis",
+                regime_probabilities={"Normal": 0.0, "High Volatility": 0.1, "Crisis": 0.9},
+                volatility_multiplier=2.0,
+                correlation_multiplier=1.5,
+                recommended_stress_level="Extreme",
+                diagnostics=diagnostics("2025-10-01"),
+            ),
+            "anomaly_result": RiskAnomalyResult(
+                anomaly_score=0.9,
+                is_anomaly=True,
+                alert_level="Extreme",
+                decision_impact="force_oos_guard",
+                diagnostics=diagnostics("2025-10-01"),
+            ),
+        }
+
+        for signal_name, signal in invalid_signals.items():
+            with self.subTest(signal=signal_name):
+                kwargs = {signal_name: signal}
+                with self.assertRaisesRegex(ValueError, "回测完整性错误"):
+                    self.engine.resolve_from_prices(
+                        tickers=self.tickers,
+                        price_df=prices,
+                        weights=[1.0 / 3.0] * 3,
+                        mode="smart",
+                        requested_max_weight=0.40,
+                        requested_min_weight=0.02,
+                        requested_turnover_penalty=0.005,
+                        requested_concentration_penalty=0.005,
+                        asof_date="2025-09-30",
+                        oos_leakage_guard=True,
+                        **kwargs,
+                    )
 
 
 if __name__ == "__main__":

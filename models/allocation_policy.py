@@ -32,6 +32,8 @@ class AllocationPolicyResult(BaseModel):
     annualized_volatility: float = Field(default=0.0)
     max_drawdown: float = Field(default=0.0)
     average_correlation: float = Field(default=0.0)
+    policy_asof: str = Field(default="", description="Date used to resolve allocation policy controls (YYYY-MM-DD)")
+    oos_leakage_guard: bool = Field(default=False, description="Whether OOS point-in-time signal validation was enforced")
     ml_asof: str = Field(default="", description="Date of the ML forecast observation window (YYYY-MM-DD)")
     ml_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     regime_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -69,6 +71,8 @@ class AllocationPolicyEngine:
         turnover_penalty: float,
         concentration_penalty: float,
         reason: str,
+        policy_asof: str = "",
+        oos_leakage_guard: bool = False,
     ) -> AllocationPolicyResult:
         return AllocationPolicyResult(
             mode=mode,
@@ -78,7 +82,43 @@ class AllocationPolicyEngine:
             concentration_penalty=concentration_penalty,
             confidence=0.35,
             reasons=[reason],
+            policy_asof=policy_asof,
+            oos_leakage_guard=oos_leakage_guard,
         )
+
+    @staticmethod
+    def _date_label(value: Optional[str]) -> str:
+        if not value:
+            return ""
+        ts = pd.to_datetime(value, errors="coerce")
+        if pd.isna(ts):
+            return ""
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+        return ts.date().isoformat()
+
+    @classmethod
+    def _diagnostic_asof(cls, result: object) -> str:
+        diagnostics = getattr(result, "diagnostics", None)
+        return cls._date_label(getattr(diagnostics, "asof_date", ""))
+
+    @classmethod
+    def _validate_signal_asof(
+        cls,
+        name: str,
+        result: object,
+        train_asof: str,
+    ) -> str:
+        signal_asof = cls._diagnostic_asof(result)
+        if not signal_asof:
+            raise ValueError(f"回测完整性错误: {name} signal is missing diagnostics.asof_date")
+        signal_ts = pd.Timestamp(signal_asof)
+        train_ts = pd.Timestamp(train_asof)
+        if signal_ts > train_ts:
+            raise ValueError(
+                f"回测完整性错误: {name} signal asof {signal_asof} exceeds train_asof {train_asof}"
+            )
+        return signal_asof
 
     @classmethod
     def resolve_from_prices(
@@ -95,8 +135,21 @@ class AllocationPolicyEngine:
         ml_result: Optional[MLRiskForecastResult] = None,
         regime_result: Optional[MarketRegimeResult] = None,
         anomaly_result: Optional[RiskAnomalyResult] = None,
+        oos_leakage_guard: bool = False,
     ) -> AllocationPolicyResult:
         """Resolve effective optimizer controls for the current request."""
+        policy_asof = cls._date_label(asof_date)
+        if oos_leakage_guard and not policy_asof:
+            raise ValueError("回测完整性错误: train_asof is required for allocation policy")
+        prevalidated_ml_asof = ""
+        if oos_leakage_guard and policy_asof:
+            if ml_result is not None:
+                prevalidated_ml_asof = cls._validate_signal_asof("ml", ml_result, policy_asof)
+            if regime_result is not None:
+                cls._validate_signal_asof("regime", regime_result, policy_asof)
+            if anomaly_result is not None:
+                cls._validate_signal_asof("anomaly", anomaly_result, policy_asof)
+
         if mode == "professional":
             return AllocationPolicyResult(
                 mode="professional",
@@ -106,6 +159,8 @@ class AllocationPolicyEngine:
                 concentration_penalty=requested_concentration_penalty,
                 confidence=1.0,
                 reasons=["Professional mode uses manual allocation controls."],
+                policy_asof=policy_asof,
+                oos_leakage_guard=oos_leakage_guard,
             )
 
         n_assets = len(tickers)
@@ -117,6 +172,8 @@ class AllocationPolicyEngine:
                 cls.default_turnover_penalty,
                 cls.default_concentration_penalty,
                 "No assets were available for adaptive allocation controls.",
+                policy_asof=policy_asof,
+                oos_leakage_guard=oos_leakage_guard,
             )
 
         try:
@@ -136,6 +193,8 @@ class AllocationPolicyEngine:
                 cls.default_turnover_penalty,
                 cls.default_concentration_penalty,
                 "Adaptive controls used defaults because the risk sample was incomplete.",
+                policy_asof=policy_asof,
+                oos_leakage_guard=oos_leakage_guard,
             )
 
         reasons: List[str] = []
@@ -172,6 +231,8 @@ class AllocationPolicyEngine:
                 1.0,
             )
             risk_level = ml_result.risk_level
+            if not prevalidated_ml_asof:
+                prevalidated_ml_asof = cls._diagnostic_asof(ml_result)
             confidence_parts.append(0.20)
             if ml_result.diagnostics and ml_result.diagnostics.fallback_used:
                 reasons.append("ML downside forecast used fallback risk estimation.")
@@ -311,7 +372,9 @@ class AllocationPolicyEngine:
             annualized_volatility=round(ann_vol, 6),
             max_drawdown=round(max_drawdown, 6),
             average_correlation=round(avg_corr, 6),
-            ml_asof=asof_date or "",
+            policy_asof=policy_asof,
+            oos_leakage_guard=oos_leakage_guard,
+            ml_asof=prevalidated_ml_asof or policy_asof,
             ml_confidence=round(ml_confidence, 4),
             regime_confidence=round(regime_confidence, 4),
             anomaly_confidence=round(anomaly_confidence, 4),

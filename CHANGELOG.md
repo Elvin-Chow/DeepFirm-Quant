@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [V5.0.0] - 2026-05-18
+
+### Backend
+- Added request IDs, centralized API error responses, payload-size protection, per-client request throttling, and concurrency guards so overloaded or malformed analytics requests degrade with traceable `request_id` metadata instead of raw server errors.
+- Hardened hosted CORS behavior by requiring explicit `ALLOW_ORIGINS` configuration in hosted environments while preserving local development origins.
+- Added unified `DataQuality` provenance across market snapshots, unified analysis, risk reports, and analytics modules, including provider chain, cache status, exchange calendar, coverage ratio, as-of date, stale/partial flags, and deduplicated warnings.
+- Strengthened market-data caching with explicit stale-cache, partial-cache, stale-partial-cache, cache-bypass, cache-disabled, and live-refresh status handling.
+- Prevented future-data leakage by replacing unbounded backfill with bounded forward-fill rules in calendar alignment, benchmark/risk-free series alignment, and OOS policy inputs, with coverage warnings surfaced to API consumers.
+- Added OOS allocation policy leakage guards, policy as-of metadata, and new integrity coverage for train/test decision workflows.
+- Disabled Hong Kong factor attribution until HK-local factors are configured, matching the explicit unavailable policy already used for China A-share, Japan, and Taiwan markets.
+- Strengthened crisis-warning artifacts with SHA-256 artifact and feature-schema hashes, global market coverage metadata, validation status, per-market requirements, expanded global training portfolios, and stricter validation quality gates.
+- Added crisis-warning artifact contract validation, future-fill policy coverage, OOS allocation integrity coverage, and updated CI/Docker hygiene for Python 3.11 validation environments and temporary artifact directories.
+- Updated FastAPI metadata to version `5.0.0`.
+
+### Frontend
+- Added first-class data-quality rendering for provider chain, cache status, calendar, coverage, as-of date, and warnings across compact and expanded data-source displays.
+- Reworked the Crisis Warning page audit surface with global market scope, required/covered/skipped markets, artifact hash, feature-schema hash, validation status, degraded-warning copy, and localized diagnostics.
+- Hid Alpha attribution for Hong Kong, China A-share, Japan, and Taiwan market modes, with localized Hong Kong unavailable messaging and clearer non-US factor-proxy copy.
+- Reset portfolios, weights, constraints, forecast settings, OOS settings, and views to market-specific defaults when switching markets, preventing stale presets from leaking across regions.
+- Removed API keys from saved browser presets and added preset sanitization so local storage only keeps portfolio and model configuration.
+- Refined mobile and tablet layouts across the header, market rail, bottom navigation, sidebar, metric cards, correlation heatmap, report actions, and dashboard cards for safer touch-width rendering.
+- Improved the Welcome market dashboard with clearer provider display, ETF proxy labels for Japanese index proxies, shorter data-delay notices, stronger breadth contrast, and mobile-safe market status rows.
+- Upgraded the frontend toolchain to Next.js `16.2.6`, pinned PostCSS to `8.5.10`, and switched production builds to the explicit webpack path.
+- Updated frontend release notes and package metadata to version `5.0.0`.
+
 ## [V4.1.0] - 2026-05-16
 
 ### Backend

@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from backend.cors import configured_origin_regex, configured_origins
+from backend.error_handling import install_error_handlers, request_id_middleware
+from backend.request_controls import request_controls_middleware
 from backend.schemas import (
     AlphaAnalysisRequest,
     AnalysisRunRequest,
@@ -21,7 +23,7 @@ from backend.schemas import (
     RiskReportResult,
 )
 from backend.market_snapshot import build_market_snapshot
-from backend.services import PortfolioAnalysisService
+from backend.services import ALPHA_UNSUPPORTED_MARKET_MESSAGES, PortfolioAnalysisService
 from data_pipeline import AlignmentError, DataFetcherError, SmartFetcher
 from models import (
     CrisisWarningRequest,
@@ -57,8 +59,11 @@ crisis_warning_service = analysis_service.crisis_warning_service
 app = FastAPI(
     title="DeepFirm Quant",
     description="Industrial-grade quant risk and decision engine",
-    version="4.1.0",
+    version="5.0.0",
 )
+app.middleware("http")(request_id_middleware)
+app.middleware("http")(request_controls_middleware)
+install_error_handlers(app, logger)
 
 app.add_middleware(
     CORSMiddleware,
@@ -301,12 +306,8 @@ async def crisis_warning(payload: CrisisWarningRequest) -> CrisisWarningResult:
 async def fama_french_alpha(payload: AlphaAnalysisRequest) -> FactorRegressionResult:
     """Run Fama-French factor attribution on an equal-weighted portfolio."""
     try:
-        if payload.market == "cn":
-            raise ValueError("China A-share factor attribution is not supported yet.")
-        if payload.market == "jp":
-            raise ValueError("Japan market factor attribution is not supported yet.")
-        if payload.market == "tw":
-            raise ValueError("Taiwan market factor attribution is not supported yet.")
+        if payload.market in ALPHA_UNSUPPORTED_MARKET_MESSAGES:
+            raise ValueError(ALPHA_UNSUPPORTED_MARKET_MESSAGES[payload.market])
         fetcher = _make_fetcher(payload.api_key, payload.allow_sandbox_data)
         engine = RiskEngine(fetcher=fetcher, aligner=aligner)
         price_df = await _run_blocking_operation(

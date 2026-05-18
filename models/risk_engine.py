@@ -8,7 +8,7 @@ import pandas as pd
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sklearn.covariance import LedoitWolf
 
-from data_pipeline import AlignmentError, DataFetcherError, MarketAligner, SmartFetcher
+from data_pipeline import AlignmentError, DataFetcherError, DataQuality, MarketAligner, SmartFetcher
 from models.market_validation import (
     MarketMode,
     is_cn_ticker,
@@ -68,6 +68,7 @@ class RiskEvaluationResult(BaseModel):
     source: str = Field(default="unknown", description="Data source used for prices")
     source_detail: str = Field(default="unknown", description="Detailed price data provenance")
     data_warnings: List[str] = Field(default_factory=list, description="Non-fatal data quality warnings")
+    data_quality: DataQuality = Field(default_factory=DataQuality, description="Unified data quality provenance")
     absolute_loss_historical: float = Field(default=0.0, description="Absolute loss based on historical ES")
     absolute_loss_monte_carlo: float = Field(default=0.0, description="Absolute loss based on Monte Carlo ES")
     cumulative_returns: List[float] = Field(default_factory=list, description="Daily cumulative return series")
@@ -861,6 +862,7 @@ class RiskEngine:
             source=self.fetcher.last_source,
             source_detail=self.fetcher.last_source_detail,
             data_warnings=list(self.fetcher.data_warnings),
+            data_quality=getattr(self.fetcher, "last_data_quality", DataQuality()),
             absolute_loss_historical=abs_loss_hist,
             absolute_loss_monte_carlo=abs_loss_mc,
             cumulative_returns=perf["cumulative_returns"],

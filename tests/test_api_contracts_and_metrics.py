@@ -11,7 +11,9 @@ from pydantic import ValidationError
 
 import backend.app as hosted_entrypoint
 from backend import main as api
-from backend.cors import configured_origin_regex
+from backend.cors import configured_origin_regex, configured_origins
+from backend.error_handling import INTERNAL_ERROR_DETAIL
+from backend.request_controls import reset_request_limiters
 from models import ViewSpec
 from models.risk_engine import RiskEngine, RiskEvaluationRequest, RiskEvaluationResult
 
@@ -323,6 +325,20 @@ class CorsContractTests(unittest.TestCase):
         with patch.dict(os.environ, {"ALLOW_ORIGINS": "https://risk.example.com"}, clear=True):
             self.assertIsNone(configured_origin_regex())
 
+    def test_hosted_environment_requires_allow_origins(self) -> None:
+        with patch.dict(os.environ, {"VERCEL": "1"}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "ALLOW_ORIGINS"):
+                configured_origins()
+
+    def test_hosted_environment_allow_list_stays_strict(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"VERCEL": "1", "ALLOW_ORIGINS": "https://risk.example.com"},
+            clear=True,
+        ):
+            self.assertEqual(configured_origins(), ["https://risk.example.com"])
+            self.assertIsNone(configured_origin_regex())
+
     def test_hosted_root_probe_does_not_import_full_backend(self) -> None:
         with patch("backend.app._load_backend_app") as load_backend:
             response = TestClient(hosted_entrypoint.app).get("/")
@@ -343,9 +359,74 @@ class CorsContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertIsInstance(response.json().get("detail"), list)
+        self.assertTrue(response.json().get("request_id"))
+
+    def test_internal_error_response_is_redacted_with_request_id(self) -> None:
+        reset_request_limiters()
+        request_id = "test-request-id"
+
+        with patch.object(api.analysis_service, "run_analysis", side_effect=RuntimeError("internal secret")):
+            response = TestClient(api.app).post(
+                "/api/v1/analysis/run",
+                headers={"X-Request-ID": request_id},
+                json={
+                    "tickers": ["AAA", "BBB"],
+                    "start_date": "2026-01-01",
+                    "end_date": "2026-06-30",
+                    "weights": [0.5, 0.5],
+                },
+            )
+
+        body = response.json()
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(body["detail"], INTERNAL_ERROR_DETAIL)
+        self.assertEqual(body["request_id"], request_id)
+        self.assertEqual(response.headers.get("X-Request-ID"), request_id)
+        self.assertNotIn("internal secret", str(body))
+
+    def test_request_body_limit_returns_request_id(self) -> None:
+        reset_request_limiters()
+        request_id = "oversize-request-id"
+
+        with patch.dict(os.environ, {"DFQ_MAX_BODY_BYTES": "20"}, clear=False):
+            response = TestClient(api.app).post(
+                "/api/v1/analysis/run",
+                headers={"X-Request-ID": request_id},
+                json={"payload": "x" * 100},
+            )
+
+        body = response.json()
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(body["request_id"], request_id)
+        self.assertEqual(response.headers.get("X-Request-ID"), request_id)
+
+    def test_rate_limit_returns_429_with_request_id(self) -> None:
+        reset_request_limiters()
+        request_id = "rate-limit-request-id"
+        client = TestClient(api.app)
+
+        with patch.dict(os.environ, {"DFQ_RATE_LIMIT_PER_MINUTE": "1"}, clear=False):
+            first = client.post(
+                "/api/v1/analysis/run",
+                headers={"X-Forwarded-For": "203.0.113.1"},
+                json={},
+            )
+            second = client.post(
+                "/api/v1/analysis/run",
+                headers={
+                    "X-Forwarded-For": "203.0.113.1",
+                    "X-Request-ID": request_id,
+                },
+                json={},
+            )
+
+        self.assertEqual(first.status_code, 422)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(second.json()["request_id"], request_id)
+        self.assertEqual(second.headers.get("X-Request-ID"), request_id)
 
     def test_hosted_entrypoint_allows_vercel_preflight(self) -> None:
-        origin = "https://deepfirm-quant.vercel.app"
+        origin = "https://deep-firm-quant.vercel.app"
         response = TestClient(hosted_entrypoint.app).options(
             "/api/v1/analysis/run",
             headers={
@@ -373,7 +454,7 @@ class CorsContractTests(unittest.TestCase):
         self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
 
     def test_full_api_allows_vercel_preflight(self) -> None:
-        origin = "https://deepfirm-quant.vercel.app"
+        origin = "https://deep-firm-quant.vercel.app"
         response = TestClient(api.app).options(
             "/api/v1/analysis/run",
             headers={

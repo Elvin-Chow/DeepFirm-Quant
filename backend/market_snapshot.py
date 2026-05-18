@@ -17,7 +17,7 @@ from backend.schemas import (
     MarketSnapshotTrendPoint,
     MarketSessionStatus,
 )
-from data_pipeline import SmartFetcher
+from data_pipeline import DataQuality, SmartFetcher
 from models.market_validation import MarketMode
 
 
@@ -454,6 +454,7 @@ def build_market_snapshot(
     ]
     source, source_detail = _source_summary(indices)
     warnings = list(dict.fromkeys(getattr(fetcher, "data_warnings", [])))
+    data_quality = getattr(fetcher, "last_data_quality", DataQuality()).with_warnings(warnings)
 
     return MarketSnapshotResult(
         market=market,
@@ -465,4 +466,5 @@ def build_market_snapshot(
         source=source,
         source_detail=source_detail,
         data_warnings=warnings,
+        data_quality=data_quality,
     )

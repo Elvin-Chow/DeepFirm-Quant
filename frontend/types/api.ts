@@ -1,5 +1,16 @@
 export type MarketMode = "us" | "hk" | "cn" | "jp" | "tw";
 
+export interface DataQuality {
+  asof_date: string | null;
+  coverage_ratio: number;
+  calendar: string;
+  cache_status: string;
+  is_stale: boolean;
+  is_partial: boolean;
+  provider_chain: string[];
+  warnings: string[];
+}
+
 export type MarketSessionStatus = "open" | "lunch_break" | "closed" | "unknown";
 export type MarketIndexStatus = "ok" | "unavailable";
 
@@ -34,6 +45,7 @@ export interface MarketSnapshotResult {
   source: string;
   source_detail: string;
   data_warnings: string[];
+  data_quality: DataQuality;
 }
 
 export interface ViewSpec {
@@ -84,6 +96,7 @@ export interface RiskEvaluationResult {
   source: string;
   source_detail?: string;
   data_warnings?: string[];
+  data_quality?: DataQuality;
   absolute_loss_historical: number;
   absolute_loss_monte_carlo: number;
   cumulative_returns: number[];
@@ -131,6 +144,7 @@ export interface RiskAnomalyResult {
   source: string;
   source_detail?: string;
   data_warnings?: string[];
+  data_quality?: DataQuality;
   diagnostics?: MLModelDiagnostics | null;
 }
 
@@ -157,6 +171,7 @@ export interface RiskRegimeResult {
   source: string;
   source_detail?: string;
   data_warnings?: string[];
+  data_quality?: DataQuality;
   diagnostics?: MLModelDiagnostics | null;
 }
 
@@ -184,6 +199,7 @@ export interface RiskMLForecastResult {
   source: string;
   source_detail?: string;
   data_warnings?: string[];
+  data_quality?: DataQuality;
   diagnostics?: MLModelDiagnostics | null;
 }
 
@@ -205,6 +221,14 @@ export interface CrisisWarningDiagnostics {
   positive_rate: number;
   validation_metrics: Record<string, number>;
   validation_positive_events: number;
+  training_market_scope: MarketMode[];
+  required_market_scope: MarketMode[];
+  covered_market_scope: MarketMode[];
+  skipped_market_scope: MarketMode[];
+  is_global_complete: boolean;
+  artifact_hash: string;
+  feature_schema_hash: string;
+  validation_status: string;
   probability_calibrated: boolean;
   shap_fallback_used: boolean;
   feature_count: number;
@@ -226,6 +250,7 @@ export interface CrisisWarningResult {
   source: string;
   source_detail?: string;
   data_warnings?: string[];
+  data_quality?: DataQuality;
 }
 
 export interface AlphaAnalysisRequest {
@@ -262,6 +287,7 @@ export interface FactorRegressionResult {
   source: string;
   source_detail?: string;
   data_warnings?: string[];
+  data_quality?: DataQuality;
   factor_source: string;
   factor_is_synthetic: boolean;
   alpha_status: "available" | "truncated";
@@ -327,6 +353,7 @@ export interface OptimizationResult {
   source: string;
   source_detail?: string;
   data_warnings?: string[];
+  data_quality?: DataQuality;
   backtest_enabled: boolean;
   oos_dates: string[];
   oos_optimized_cum_returns: number[];
@@ -386,6 +413,7 @@ export interface AnalysisRunResult {
   regime?: RiskRegimeResult | null;
   ml_forecast?: RiskMLForecastResult | null;
   crisis_warning?: CrisisWarningResult | null;
+  data_quality?: DataQuality;
 }
 
 export type ReportLanguage = "en" | "zh" | "tc";
@@ -513,4 +541,5 @@ export interface RiskReportResult {
   methodology_notes: RiskReportMethodologyNote[];
   disclaimers: string[];
   data_warnings: string[];
+  data_quality: DataQuality;
 }

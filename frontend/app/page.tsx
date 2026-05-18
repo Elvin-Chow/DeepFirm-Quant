@@ -113,6 +113,24 @@ const DEFAULT_TICKERS_BY_MARKET: Record<MarketMode, string> = {
   jp: "7203.T,6758.T,9984.T",
   tw: "2330.TW,2317.TW,2454.TW",
 };
+const ALPHA_DISABLED_MARKETS = new Set<MarketMode>(["hk", "cn", "jp", "tw"]);
+const DEFAULT_TIME_WINDOW = "1Y";
+const DEFAULT_CAPITAL = 1_000_000;
+const DEFAULT_LEVERAGE = 1.0;
+const DEFAULT_MC_PATHS = 10_000;
+const DEFAULT_ML_HORIZON: MLForecastHorizon = 5;
+const DEFAULT_REGIME_MODEL_TYPE: RegimeModelType = "kmeans";
+const DEFAULT_MAX_WEIGHT = 0.40;
+const DEFAULT_MIN_WEIGHT = 0.02;
+const DEFAULT_TURNOVER_PENALTY = 0.005;
+const DEFAULT_CONCENTRATION_PENALTY = 0.005;
+const DEFAULT_OOS_GUARD_ENABLED = true;
+const DEFAULT_ALLOCATION_MODE: AllocationMode = "smart";
+const DEFAULT_ALLOW_SANDBOX_DATA = false;
+const DEFAULT_BACKTEST_ENABLED = true;
+const DEFAULT_TEST_RATIO = 0.30;
+const DEFAULT_VIEW_RETURN = 0.02;
+const DEFAULT_VIEW_CONFIDENCE = 0.3;
 
 const MARKET_SELECTION_STORAGE_KEY = "deepfirm.marketMode.v1";
 const MARKET_SNAPSHOT_STORAGE_KEY = "deepfirm.marketSnapshots.v1";
@@ -219,6 +237,12 @@ function computeDateRange(window: string): { start: string; end: string } {
   }
   const fmt = (d: Date) => d.toISOString().split("T")[0];
   return { start: fmt(start), end: fmt(end) };
+}
+
+function defaultWeightsForTickers(tickerText: string): number[] {
+  const tickerCount = tickerText.split(",").map((ticker) => ticker.trim()).filter(Boolean).length;
+  if (tickerCount === 0) return [];
+  return Array.from({ length: tickerCount }, () => Math.round(100 / tickerCount));
 }
 
 function hasHkSuffix(ticker: string): boolean {
@@ -394,6 +418,7 @@ export default function Home() {
 
   const [activeTab, setActiveTab] = useState<TabKey>("welcome");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [presetResetKey, setPresetResetKey] = useState(0);
 
   const [tickers, setTickers] = useState(DEFAULT_TICKERS_BY_MARKET.us);
   const [market, setMarket] = useState<MarketMode>("us");
@@ -401,27 +426,27 @@ export default function Home() {
   const [marketSnapshots, setMarketSnapshots] = useState<Partial<Record<MarketMode, MarketSnapshotResult>>>({});
   const [marketSnapshotsReady, setMarketSnapshotsReady] = useState(false);
   const [marketSnapshotRefreshTimes, setMarketSnapshotRefreshTimes] = useState<Partial<Record<MarketMode, number>>>({});
-  const [timeWindow, setTimeWindow] = useState("1Y");
+  const [timeWindow, setTimeWindow] = useState(DEFAULT_TIME_WINDOW);
   const [weights, setWeights] = useState<number[]>([]);
-  const [capital, setCapital] = useState(1_000_000);
-  const [leverage, setLeverage] = useState(1.0);
-  const [mcPaths, setMcPaths] = useState(10_000);
-  const [mlHorizon, setMlHorizon] = useState<MLForecastHorizon>(5);
-  const [regimeModelType, setRegimeModelType] = useState<RegimeModelType>("kmeans");
-  const [maxWeight, setMaxWeight] = useState(0.40);
-  const [minWeight, setMinWeight] = useState(0.02);
-  const [turnoverPenalty, setTurnoverPenalty] = useState(0.005);
-  const [concentrationPenalty, setConcentrationPenalty] = useState(0.005);
-  const [oosGuardEnabled, setOosGuardEnabled] = useState(true);
-  const [allocationMode, setAllocationMode] = useState<AllocationMode>("smart");
-  const [allowSandboxData, setAllowSandboxData] = useState(false);
-  const [backtestEnabled, setBacktestEnabled] = useState(true);
-  const [testRatio, setTestRatio] = useState(0.30);
+  const [capital, setCapital] = useState(DEFAULT_CAPITAL);
+  const [leverage, setLeverage] = useState(DEFAULT_LEVERAGE);
+  const [mcPaths, setMcPaths] = useState(DEFAULT_MC_PATHS);
+  const [mlHorizon, setMlHorizon] = useState<MLForecastHorizon>(DEFAULT_ML_HORIZON);
+  const [regimeModelType, setRegimeModelType] = useState<RegimeModelType>(DEFAULT_REGIME_MODEL_TYPE);
+  const [maxWeight, setMaxWeight] = useState(DEFAULT_MAX_WEIGHT);
+  const [minWeight, setMinWeight] = useState(DEFAULT_MIN_WEIGHT);
+  const [turnoverPenalty, setTurnoverPenalty] = useState(DEFAULT_TURNOVER_PENALTY);
+  const [concentrationPenalty, setConcentrationPenalty] = useState(DEFAULT_CONCENTRATION_PENALTY);
+  const [oosGuardEnabled, setOosGuardEnabled] = useState(DEFAULT_OOS_GUARD_ENABLED);
+  const [allocationMode, setAllocationMode] = useState<AllocationMode>(DEFAULT_ALLOCATION_MODE);
+  const [allowSandboxData, setAllowSandboxData] = useState(DEFAULT_ALLOW_SANDBOX_DATA);
+  const [backtestEnabled, setBacktestEnabled] = useState(DEFAULT_BACKTEST_ENABLED);
+  const [testRatio, setTestRatio] = useState(DEFAULT_TEST_RATIO);
 
   const [viewTicker, setViewTicker] = useState("");
   const [viewRelative, setViewRelative] = useState("");
-  const [viewReturn, setViewReturn] = useState(0.02);
-  const [viewConfidence, setViewConfidence] = useState(0.3);
+  const [viewReturn, setViewReturn] = useState(DEFAULT_VIEW_RETURN);
+  const [viewConfidence, setViewConfidence] = useState(DEFAULT_VIEW_CONFIDENCE);
   const [apiKey, setApiKey] = useState("");
 
   const [riskData, setRiskData] = useState<RiskEvaluationResult | null>(null);
@@ -467,17 +492,43 @@ export default function Home() {
     setAnalysisCompleted(nextState.analysisCompleted);
   }, []);
 
+  const resetFormToMarketDefaults = useCallback((nextMarket: MarketMode) => {
+    const defaultTickers = DEFAULT_TICKERS_BY_MARKET[nextMarket];
+    setTickers(defaultTickers);
+    setWeights(defaultWeightsForTickers(defaultTickers));
+    setTimeWindow(DEFAULT_TIME_WINDOW);
+    setCapital(DEFAULT_CAPITAL);
+    setLeverage(DEFAULT_LEVERAGE);
+    setMcPaths(DEFAULT_MC_PATHS);
+    setMlHorizon(DEFAULT_ML_HORIZON);
+    setRegimeModelType(DEFAULT_REGIME_MODEL_TYPE);
+    setMaxWeight(DEFAULT_MAX_WEIGHT);
+    setMinWeight(DEFAULT_MIN_WEIGHT);
+    setTurnoverPenalty(DEFAULT_TURNOVER_PENALTY);
+    setConcentrationPenalty(DEFAULT_CONCENTRATION_PENALTY);
+    setOosGuardEnabled(DEFAULT_OOS_GUARD_ENABLED);
+    setAllocationMode(DEFAULT_ALLOCATION_MODE);
+    setAllowSandboxData(DEFAULT_ALLOW_SANDBOX_DATA);
+    setBacktestEnabled(DEFAULT_BACKTEST_ENABLED);
+    setTestRatio(DEFAULT_TEST_RATIO);
+    setViewTicker("");
+    setViewRelative("");
+    setViewReturn(DEFAULT_VIEW_RETURN);
+    setViewConfidence(DEFAULT_VIEW_CONFIDENCE);
+  }, []);
+
   const handleMarketChange = useCallback((nextMarket: MarketMode) => {
     if (nextMarket === activeMarketRef.current) {
       return;
     }
     activeMarketRef.current = nextMarket;
     setMarket(nextMarket);
-    setTickers(DEFAULT_TICKERS_BY_MARKET[nextMarket]);
+    resetFormToMarketDefaults(nextMarket);
+    setPresetResetKey((current) => current + 1);
     writeStoredMarketMode(nextMarket);
     setError(null);
     applyAnalysisViewState(analysisByMarket[nextMarket] ?? createEmptyAnalysisViewState());
-  }, [analysisByMarket, applyAnalysisViewState]);
+  }, [analysisByMarket, applyAnalysisViewState, resetFormToMarketDefaults]);
 
   const handleMarketSnapshotChange = useCallback((snapshot: MarketSnapshotResult) => {
     setMarketSnapshots((current) => {
@@ -576,7 +627,7 @@ export default function Home() {
   }, [tickers]);
 
   useEffect(() => {
-    if ((market === "cn" || market === "jp" || market === "tw") && activeTab === "alpha") {
+    if (ALPHA_DISABLED_MARKETS.has(market) && activeTab === "alpha") {
       setActiveTab("risk");
     }
   }, [market, activeTab]);
@@ -804,13 +855,12 @@ export default function Home() {
       viewRelative,
       viewReturn,
       viewConfidence,
-      apiKey,
     });
   }, [
     tickers, market, timeWindow, weights, capital, leverage, mcPaths, mlHorizon, maxWeight,
     minWeight, turnoverPenalty, concentrationPenalty, oosGuardEnabled, allocationMode, allowSandboxData,
     backtestEnabled, testRatio, viewTicker, viewRelative, viewReturn, viewConfidence,
-    regimeModelType, apiKey, addPreset,
+    regimeModelType, addPreset,
   ]);
 
   const handleLoadPreset = useCallback((preset: Preset) => {
@@ -840,7 +890,6 @@ export default function Home() {
     setViewRelative(preset.viewRelative);
     setViewReturn(preset.viewReturn);
     setViewConfidence(preset.viewConfidence);
-    setApiKey(preset.apiKey);
   }, []);
 
   const allTabs: TabConfig[] = [
@@ -852,7 +901,7 @@ export default function Home() {
     { key: "decision", label: t(lang, "decision"), desktopLabel: t(lang, "decision"), mobileLabel: t(lang, "decision"), icon: SlidersHorizontal },
     { key: "report", label: t(lang, "report"), desktopLabel: t(lang, "report"), mobileLabel: t(lang, "reportMobile"), icon: FileText },
   ];
-  const alphaHidden = market === "cn" || market === "jp" || market === "tw";
+  const alphaHidden = ALPHA_DISABLED_MARKETS.has(market);
   const tabs = allTabs.filter((tab) => !alphaHidden || tab.key !== "alpha");
   const currencySymbol = getCurrencySymbol(market);
   const mobileGridClass =
@@ -923,6 +972,7 @@ export default function Home() {
         setLang={setLang}
         currencySymbol={currencySymbol}
         presets={presets}
+        presetResetKey={presetResetKey}
         onSavePreset={handleSavePreset}
         onLoadPreset={handleLoadPreset}
         onDeletePreset={removePreset}
@@ -931,7 +981,6 @@ export default function Home() {
         onCloseMobile={() => setSidebarOpen(false)}
       />
 
-      {/* Mobile overlay mask */}
       {sidebarOpen && (
         <div
           className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden"
@@ -941,18 +990,18 @@ export default function Home() {
 
       <main className="min-w-0 flex-1 pb-[calc(6.5rem+env(safe-area-inset-bottom))] lg:h-screen lg:overflow-y-auto lg:pb-0">
         <div className="sticky top-0 z-20 border-b border-df-border bg-[rgba(255,255,255,0.9)] shadow-[0_14px_30px_-30px_rgba(15,23,42,0.22)] backdrop-blur-xl dark:bg-[rgba(12,15,15,0.9)] dark:shadow-[0_18px_44px_-36px_rgba(0,0,0,0.95)]">
-          <div className="h-[60px] px-4 lg:px-[18px]">
-            <div className="flex h-full items-center justify-between gap-4">
-              <div className="flex min-w-0 flex-1 items-center gap-5">
+          <div className="mobile-header-shell h-[60px] px-4 lg:px-[18px]">
+            <div className="mobile-header-row flex h-full items-center justify-between gap-4">
+              <div className="mobile-header-title-wrap flex min-w-0 flex-1 items-center gap-5">
                 <button
                   onClick={() => setSidebarOpen(true)}
-                  className="flex h-9 w-9 items-center justify-center rounded-md text-df-text-secondary transition-colors hover:bg-df-surface-solid/30 hover:text-df-text lg:hidden"
+                  className="flex h-10 w-10 items-center justify-center rounded-md text-df-text-secondary transition-colors hover:bg-df-surface-solid/30 hover:text-df-text lg:hidden"
                   aria-label="Open menu"
                 >
                   <Menu size={22} />
                 </button>
                 <span
-                  className={`min-w-0 truncate text-df-text ${
+                  className={`mobile-header-title min-w-0 truncate text-df-text ${
                     activeTab === "welcome"
                       ? "font-serif text-[16px] font-semibold leading-tight tracking-normal"
                       : "text-sm font-semibold"
@@ -1002,6 +1051,31 @@ export default function Home() {
             </div>
           </div>
 
+          <div className="mobile-market-rail border-t border-df-border/70 px-3 pb-2 md:hidden">
+            <div className="grid grid-cols-5 gap-1 rounded-xl border border-df-border bg-df-surface-solid/40 p-1 shadow-[0_12px_28px_-26px_rgba(15,23,42,0.32)]">
+              {MARKET_NAV_OPTIONS.map((option) => {
+                const selected = market === option.key;
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    title={option.title}
+                    onClick={() => handleMarketChange(option.key)}
+                    className={`mobile-market-option flex min-h-10 min-w-0 items-center justify-center gap-1 rounded-lg border px-1.5 text-[11px] font-semibold transition-colors click-press ${
+                      selected
+                        ? "market-option-selected"
+                        : "market-option-idle"
+                    }`}
+                    aria-pressed={selected}
+                  >
+                    <MarketFlagBadge flags={option.flags} />
+                    <span className="truncate">{option.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="hidden px-4 pb-2 lg:block lg:px-[18px]">
             <nav
               aria-label="Primary navigation"
@@ -1032,7 +1106,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="mx-auto flex min-h-[calc(100dvh-9rem)] max-w-none flex-col px-4 py-4 page-fade-in sm:px-5 lg:min-h-[calc(100vh-112px)] lg:px-[17px] lg:py-4">
+        <div className="mobile-content-shell mx-auto flex min-h-[calc(100dvh-9rem)] max-w-none flex-col px-4 py-4 page-fade-in sm:px-5 lg:min-h-[calc(100vh-112px)] lg:px-[17px] lg:py-4">
 
           {loading && (
             <div className="mb-4">
@@ -1094,10 +1168,10 @@ export default function Home() {
       </main>
 
       <nav
-        className="fixed inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-30 lg:hidden"
+        className="mobile-bottom-nav fixed inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-30 lg:hidden"
         aria-label="Primary navigation"
       >
-        <div className={`grid ${mobileGridClass} gap-1 rounded-2xl border border-df-border bg-df-surface/95 p-1 shadow-[0_18px_40px_rgba(15,23,42,0.18)] backdrop-blur-2xl dark:bg-df-surface/90`}>
+        <div className={`mobile-bottom-nav-grid grid ${mobileGridClass} gap-1 rounded-2xl border border-df-border bg-df-surface/95 p-1 shadow-[0_18px_40px_rgba(15,23,42,0.18)] backdrop-blur-2xl dark:bg-df-surface/90`}>
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.key;
@@ -1107,7 +1181,7 @@ export default function Home() {
                 type="button"
                 onClick={() => setActiveTab(tab.key)}
                 aria-current={isActive ? "page" : undefined}
-                className={`relative isolate flex min-w-0 flex-col items-center justify-center gap-1 overflow-hidden rounded-xl px-1 py-2 text-[10px] font-semibold leading-none transition-all click-press ${
+                className={`mobile-bottom-nav-item relative isolate flex min-w-0 flex-col items-center justify-center gap-1 overflow-hidden rounded-xl px-1 py-2 text-[10px] font-semibold leading-none transition-all click-press ${
                   isActive
                     ? "text-white"
                     : "text-df-text-secondary hover:bg-df-surface-solid/35 hover:text-df-text"

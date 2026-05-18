@@ -6,6 +6,7 @@ from typing import Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from data_pipeline import DataQuality
 from models import (
     AllocationMode,
     CrisisWarningResult,
@@ -127,6 +128,7 @@ class AnalysisRunResult(BaseModel):
     regime: Optional[MarketRegimeResult] = Field(default=None)
     ml_forecast: Optional[MLRiskForecastResult] = Field(default=None)
     crisis_warning: Optional[CrisisWarningResult] = Field(default=None)
+    data_quality: DataQuality = Field(default_factory=DataQuality)
 
 
 MarketSessionStatus = Literal["open", "lunch_break", "closed", "unknown"]
@@ -170,6 +172,7 @@ class MarketSnapshotResult(BaseModel):
     source: str = Field(default="")
     source_detail: str = Field(default="")
     data_warnings: List[str] = Field(default_factory=list)
+    data_quality: DataQuality = Field(default_factory=DataQuality)
 
 
 ReportLanguage = Literal["en", "zh", "tc"]
@@ -324,3 +327,4 @@ class RiskReportResult(BaseModel):
     methodology_notes: List[RiskReportMethodologyNote] = Field(default_factory=list)
     disclaimers: List[str] = Field(default_factory=list)
     data_warnings: List[str] = Field(default_factory=list)
+    data_quality: DataQuality = Field(default_factory=DataQuality)

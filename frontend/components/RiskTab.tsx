@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useTheme } from "@/hooks/useTheme";
 import { RiskAnomalyResult, RiskEvaluationResult, RiskRegimeResult } from "@/types/api";
 import { t, Lang } from "@/lib/i18n";
@@ -63,6 +63,20 @@ const RETURN_RANGE_OPTIONS: ReturnRangeOption[] = [
 ];
 
 const CHART_ANIMATION_MS = 1150;
+
+function useCompactViewport(): boolean {
+  const [compact, setCompact] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 640px)");
+    const updateCompact = () => setCompact(mediaQuery.matches);
+    updateCompact();
+    mediaQuery.addEventListener("change", updateCompact);
+    return () => mediaQuery.removeEventListener("change", updateCompact);
+  }, []);
+
+  return compact;
+}
 
 function toChartPercent(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
@@ -263,6 +277,7 @@ interface RiskTabProps {
 export default function RiskTab({ data, anomaly, regime, loading, lang, currencySymbol }: RiskTabProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
+  const compactViewport = useCompactViewport();
   const [returnRange, setReturnRange] = useState<ReturnRangeKey>("1Y");
   const [endpointVisible, setEndpointVisible] = useState(false);
 
@@ -357,6 +372,10 @@ export default function RiskTab({ data, anomaly, regime, loading, lang, currency
   const correlationValueClass = tickers.length > 8 ? "text-[11px]" : tickers.length > 6 ? "text-xs" : "text-sm";
   const correlationHeaderClass = tickers.length > 8 ? "text-[10px]" : "text-xs";
   const correlationLabelWidth = tickers.length > 8 ? "3.75rem" : "4.25rem";
+  const correlationGridStyle = {
+    "--correlation-grid-min-width": `${Math.max(360, tickers.length * 62 + 128)}px`,
+    gridTemplateColumns: `${correlationLabelWidth} repeat(${tickers.length}, minmax(0, 1fr)) 3rem`,
+  } as CSSProperties;
 
   const gridColor = isDark ? "rgba(255,255,255,0.075)" : "rgba(15,23,42,0.07)";
   const axisColor = isDark ? "#a1a1aa" : "#64748b";
@@ -485,7 +504,7 @@ export default function RiskTab({ data, anomaly, regime, loading, lang, currency
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
                 data={filteredChartData}
-                margin={{ top: 10, right: 58, bottom: 2, left: 0 }}
+                margin={compactViewport ? { top: 10, right: 10, bottom: 2, left: -8 } : { top: 10, right: 58, bottom: 2, left: 0 }}
               >
                 <defs>
                   <linearGradient id="riskReturnGradient" x1="0" y1="0" x2="0" y2="1">
@@ -512,11 +531,11 @@ export default function RiskTab({ data, anomaly, regime, loading, lang, currency
                   tickFormatter={formatAxisDate}
                   tickLine={false}
                   axisLine={false}
-                  minTickGap={32}
+                  minTickGap={compactViewport ? 44 : 32}
                   tickMargin={8}
                 />
                 <YAxis
-                  width={36}
+                  width={compactViewport ? 32 : 36}
                   domain={yAxisDomain}
                   tick={{ fill: axisColor, fontSize: 10 }}
                   tickLine={false}
@@ -583,11 +602,11 @@ export default function RiskTab({ data, anomaly, regime, loading, lang, currency
                     strokeWidth={2}
                     label={{
                       value: formatSignedPercent(latestReturnPoint.value),
-                      position: "right",
+                      position: compactViewport ? "top" : "right",
                       fill: accentHex,
-                      fontSize: 11,
+                      fontSize: compactViewport ? 10 : 11,
                       fontWeight: 700,
-                      dy: labelOffsets.portfolio,
+                      dy: compactViewport ? -5 : labelOffsets.portfolio,
                     }}
                   />
                 )}
@@ -601,11 +620,11 @@ export default function RiskTab({ data, anomaly, regime, loading, lang, currency
                     strokeWidth={2}
                     label={{
                       value: formatSignedPercent(latestBenchmarkPoint.value),
-                      position: "right",
+                      position: compactViewport ? "top" : "right",
                       fill: benchmarkStroke,
-                      fontSize: 11,
+                      fontSize: compactViewport ? 10 : 11,
                       fontWeight: 700,
-                      dy: labelOffsets.benchmark,
+                      dy: compactViewport ? -5 : labelOffsets.benchmark,
                     }}
                   />
                 )}
@@ -619,11 +638,11 @@ export default function RiskTab({ data, anomaly, regime, loading, lang, currency
                     strokeWidth={2}
                     label={{
                       value: formatSignedPercent(latestRiskFreePoint.value),
-                      position: "right",
+                      position: compactViewport ? "top" : "right",
                       fill: riskFreeStroke,
-                      fontSize: 11,
+                      fontSize: compactViewport ? 10 : 11,
                       fontWeight: 700,
-                      dy: labelOffsets.riskFree,
+                      dy: compactViewport ? -5 : labelOffsets.riskFree,
                     }}
                   />
                 )}
@@ -732,12 +751,10 @@ export default function RiskTab({ data, anomaly, regime, loading, lang, currency
             <span className="text-xs font-semibold text-df-text-secondary">({t(lang, "dailyReturnsLabel")})</span>
             <HelpTip text={t(lang, "assetCorrelationHelp")} />
           </div>
-          <div className="overflow-hidden pb-2">
+          <div className="mobile-correlation-scroll overflow-hidden pb-2">
             <div
-              className="grid w-full items-center gap-0"
-              style={{
-                gridTemplateColumns: `${correlationLabelWidth} repeat(${tickers.length}, minmax(0, 1fr)) 3rem`,
-              }}
+              className="mobile-correlation-grid grid w-full items-center gap-0"
+              style={correlationGridStyle}
             >
               <div />
               {tickers.map((ticker) => (
@@ -806,6 +823,7 @@ export default function RiskTab({ data, anomaly, regime, loading, lang, currency
         riskFreeRateSource={data.risk_free_source}
         riskFreeRateSourceDetail={data.risk_free_source_detail}
         warnings={data.data_warnings}
+        dataQuality={data.data_quality}
         compact
       />
     </div>

@@ -8,7 +8,7 @@ import pandas as pd
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sklearn.ensemble import IsolationForest
 
-from data_pipeline import MarketAligner, SmartFetcher
+from data_pipeline import DataQuality, MarketAligner, SmartFetcher
 from models.market_validation import MarketMode
 from models.ml_diagnostics import MLModelDiagnostics, diagnostics_from_frame
 from models.request_validation import (
@@ -84,6 +84,7 @@ class RiskAnomalyResult(BaseModel):
     source: str = Field(default="unknown", description="Data source used for prices")
     source_detail: str = Field(default="unknown", description="Detailed price data provenance")
     data_warnings: List[str] = Field(default_factory=list, description="Non-fatal data quality warnings")
+    data_quality: DataQuality = Field(default_factory=DataQuality, description="Unified data quality provenance")
     diagnostics: Optional[MLModelDiagnostics] = Field(default=None)
 
 
@@ -91,6 +92,7 @@ class RiskAnomalyDetector:
     """Detect abnormal portfolio risk states using engineered features and Isolation Forest."""
 
     model_version = "anomaly-2026-05-09"
+    PRICE_FORWARD_FILL_LIMIT = 1
     feature_columns = [
         "daily_return",
         "absolute_daily_return",
@@ -111,9 +113,7 @@ class RiskAnomalyDetector:
         self.fetcher = fetcher
         self.aligner = aligner
         self.risk_engine = (
-            RiskEngine(fetcher=fetcher, aligner=aligner)
-            if fetcher is not None and aligner is not None
-            else None
+            RiskEngine(fetcher=fetcher, aligner=aligner) if fetcher is not None and aligner is not None else None
         )
 
     @staticmethod
@@ -130,6 +130,30 @@ class RiskAnomalyDetector:
         prices = prices.sort_index()
         return prices.apply(pd.to_numeric, errors="coerce")
 
+    @classmethod
+    def _price_coverage_warning(
+        cls,
+        total_rows: int,
+        total_cells: int,
+        observed_cells: int,
+        filled_cells: int,
+        retained_rows: int,
+    ) -> str:
+        if total_rows <= 0 or total_cells <= 0:
+            return ""
+        if observed_cells == total_cells and filled_cells == 0 and retained_rows == total_rows:
+            return ""
+
+        observed_ratio = observed_cells / total_cells
+        retained_ratio = retained_rows / total_rows
+        return (
+            f"Anomaly price coverage warning: observed {observed_cells}/"
+            f"{total_cells} price cells ({observed_ratio:.1%}), forward-filled "
+            f"{filled_cells} with limit {cls.PRICE_FORWARD_FILL_LIMIT}, retained "
+            f"{retained_rows}/{total_rows} dates ({retained_ratio:.1%}) after "
+            "residual gaps."
+        )
+
     @staticmethod
     def _rolling_correlation_mean(returns_df: pd.DataFrame) -> pd.Series:
         """Compute mean pairwise rolling correlation across assets."""
@@ -139,7 +163,7 @@ class RiskAnomalyDetector:
         filled_returns = returns_df.replace([np.inf, -np.inf], np.nan).fillna(0.0)
         values: List[float] = []
         for end_idx in range(len(filled_returns)):
-            window = filled_returns.iloc[max(0, end_idx - 19): end_idx + 1]
+            window = filled_returns.iloc[max(0, end_idx - 19) : end_idx + 1]
             if len(window) < 3:
                 values.append(0.0)
                 continue
@@ -170,7 +194,27 @@ class RiskAnomalyDetector:
         invalid_mask = prices.isna() | ~finite_mask | (prices <= 0.0)
         missing_ratio = invalid_mask.mean(axis=1)
 
-        clean_prices = prices.mask(invalid_mask).ffill().bfill()
+        masked_prices = prices.mask(invalid_mask)
+        observed_cells = int(masked_prices.notna().sum().sum())
+        clean_prices = masked_prices.ffill(limit=cls.PRICE_FORWARD_FILL_LIMIT)
+        filled_cells = int((clean_prices.notna() & masked_prices.isna()).sum().sum())
+        residual_rows = clean_prices.isna().any(axis=1) | (clean_prices <= 0.0).any(axis=1)
+        retained_rows = int((~residual_rows).sum())
+        coverage_warnings = [
+            warning
+            for warning in [
+                cls._price_coverage_warning(
+                    len(prices),
+                    prices.size,
+                    observed_cells,
+                    filled_cells,
+                    retained_rows,
+                )
+            ]
+            if warning
+        ]
+        clean_prices = clean_prices.loc[~residual_rows]
+        missing_ratio = missing_ratio.reindex(clean_prices.index)
         if clean_prices.isna().any().any() or (clean_prices <= 0.0).any().any():
             raise ValueError("price data contains no usable positive finite values")
 
@@ -208,7 +252,10 @@ class RiskAnomalyDetector:
             index=asset_returns.index,
         )
         features = features.replace([np.inf, -np.inf], np.nan).fillna(0.0)
-        return features[cls.feature_columns].astype(float)
+        result = features[cls.feature_columns].astype(float)
+        if coverage_warnings:
+            result.attrs["coverage_warnings"] = coverage_warnings
+        return result
 
     @staticmethod
     def _safe_quantile(history: pd.Series, q: float, fallback: float) -> float:
@@ -382,6 +429,7 @@ class RiskAnomalyDetector:
         n_assets = len(tickers)
         normalized_weights = RiskEngine._normalize_weights(weights, n_assets)
         features = self.build_feature_frame(price_df, normalized_weights)
+        coverage_warnings = list(features.attrs.get("coverage_warnings", []) or [])
 
         model_score, model_anomaly = self._model_score(features)
         rule_score, reasons = self._rule_floor(features, n_assets)
@@ -405,7 +453,10 @@ class RiskAnomalyDetector:
                 "anomaly_score": score,
                 "contamination": self._adaptive_contamination(features),
             },
-            warnings=[] if score < 0.60 else ["Anomaly signal affects allocation controls."],
+            warnings=[
+                *coverage_warnings,
+                *([] if score < 0.60 else ["Anomaly signal affects allocation controls."]),
+            ],
             confidence=float(np.clip(0.50 + score * 0.50, 0.0, 1.0)),
         )
         return RiskAnomalyResult(
@@ -417,6 +468,7 @@ class RiskAnomalyDetector:
             structured_reasons=structured,
             decision_impact=self._decision_impact(score, alert_level, reason_codes),
             source=source,
+            data_warnings=coverage_warnings,
             diagnostics=diagnostics,
         )
 

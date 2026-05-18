@@ -12,6 +12,7 @@ export function localizeProvider(value: string | undefined, lang: Lang): string 
   const providerMap: Record<string, string> = {
     yfinance: "Yahoo Finance",
     yahoo_chart: "Yahoo Finance",
+    yahoo_chart_cn: byLang(lang, "Yahoo Finance · China market", "Yahoo Finance · 中国市场", "Yahoo Finance · 中國市場"),
     tiingo: "Tiingo",
     akshare: "AKShare",
     kenneth_french: "Kenneth French Data Library",
@@ -22,17 +23,30 @@ export function localizeProvider(value: string | undefined, lang: Lang): string 
     unknown: byLang(lang, "Unknown", "未知", "未知"),
   };
 
-  const cacheMatch = normalized.match(/^(stale cache|cache)\s*\(([^)]+)\)$/);
+  const cacheMatch = normalized.match(/^(stale partial cache|partial cache|stale cache|cache)\s*\(([^)]+)\)$/);
   if (cacheMatch) {
-    const cacheLabel =
-      cacheMatch[1] === "stale cache"
-        ? byLang(lang, "Stale cache", "缓存兜底", "快取兜底")
-        : byLang(lang, "Cache", "缓存", "快取");
+    const cacheLabels: Record<string, string> = {
+      "stale partial cache": byLang(lang, "Stale partial cache", "陈旧且不完整缓存", "陳舊且不完整快取"),
+      "partial cache": byLang(lang, "Partial cache", "不完整缓存", "不完整快取"),
+      "stale cache": byLang(lang, "Stale cache", "缓存兜底", "快取兜底"),
+      cache: byLang(lang, "Cache", "缓存", "快取"),
+    };
+    const cacheLabel = cacheLabels[cacheMatch[1]] || cacheLabels.cache;
     const provider = providerMap[cacheMatch[2]] || cacheMatch[2];
     return `${cacheLabel} · ${provider}`;
   }
 
   if (normalized === "stale_cache") return byLang(lang, "Stale cache", "缓存兜底", "快取兜底");
+  if (normalized === "partial_cache" || normalized === "partial") {
+    return byLang(lang, "Partial cache", "不完整缓存", "不完整快取");
+  }
+  if (normalized === "stale_partial" || normalized === "stale_partial_cache") {
+    return byLang(lang, "Stale partial cache", "陈旧且不完整缓存", "陳舊且不完整快取");
+  }
+  if (normalized === "hit" || normalized === "cache_hit") return byLang(lang, "Cache hit", "缓存命中", "快取命中");
+  if (normalized === "miss") return byLang(lang, "Live refresh", "实时刷新", "即時刷新");
+  if (normalized === "disabled") return byLang(lang, "Cache disabled", "缓存关闭", "快取關閉");
+  if (normalized === "bypassed") return byLang(lang, "Cache bypassed", "跳过缓存", "略過快取");
   if (normalized === "cache") return byLang(lang, "Cache", "缓存", "快取");
   if (normalized === "mixed") return byLang(lang, "Mixed sources", "混合来源", "混合來源");
   if (normalized === "china a-share policy fallback (2.00% annualized)") {
@@ -62,6 +76,48 @@ export function localizeWarning(message: string, lang: Lang): string {
       `${cached[1]} used cached prices; this run did not refresh live quotes.`,
       `${cached[1]} 本次未刷新到最新价格，已使用缓存价格。`,
       `${cached[1]} 本次未刷新到最新價格，已使用快取價格。`
+    );
+  }
+
+  const qualifiedCache = trimmed.match(
+    /^(.+): using (stale partial cached|stale cached|partial cached) prices because live data is temporarily unavailable or incomplete$/i
+  );
+  if (qualifiedCache) {
+    const rawQualifier = qualifiedCache[2].toLowerCase();
+    const qualifier = rawQualifier.startsWith("stale partial")
+      ? byLang(lang, "stale partial cached", "陈旧且不完整缓存", "陳舊且不完整快取")
+      : rawQualifier.startsWith("stale")
+      ? byLang(lang, "stale cached", "陈旧缓存", "陳舊快取")
+      : byLang(lang, "partial cached", "不完整缓存", "不完整快取");
+    return byLang(
+      lang,
+      `${qualifiedCache[1]} used ${qualifier} prices; provider data did not refresh completely.`,
+      `${qualifiedCache[1]} 本次使用${qualifier}价格，实时数据未完整刷新。`,
+      `${qualifiedCache[1]} 本次使用${qualifier}價格，即時資料未完整刷新。`
+    );
+  }
+
+  const akshareBenchmarkFallback = trimmed.match(
+    /^(.+): AKShare benchmark data was unavailable; using Yahoo Finance fallback$/i
+  );
+  if (akshareBenchmarkFallback) {
+    return byLang(
+      lang,
+      `${akshareBenchmarkFallback[1]} benchmark data was unavailable from AKShare; Yahoo Finance fallback was used.`,
+      `${akshareBenchmarkFallback[1]} 的 AKShare 基准数据不可用，已使用 Yahoo Finance 兜底。`,
+      `${akshareBenchmarkFallback[1]} 的 AKShare 基準資料不可用，已使用 Yahoo Finance 兜底。`
+    );
+  }
+
+  const aksharePriceFallback = trimmed.match(
+    /^(.+): AKShare A-share data was unavailable; using Yahoo Finance fallback$/i
+  );
+  if (aksharePriceFallback) {
+    return byLang(
+      lang,
+      `${aksharePriceFallback[1]} A-share prices were unavailable from AKShare; Yahoo Finance fallback was used.`,
+      `${aksharePriceFallback[1]} 的 AKShare A股价格不可用，已使用 Yahoo Finance 兜底。`,
+      `${aksharePriceFallback[1]} 的 AKShare A股價格不可用，已使用 Yahoo Finance 兜底。`
     );
   }
 
@@ -158,6 +214,11 @@ export function localizeWarning(message: string, lang: Lang): string {
       "China A-share factor attribution is not supported yet.",
       "中国 A 股因子归因暂未接入。",
       "中國 A 股因子歸因暫未接入。",
+    ],
+    "Hong Kong market factor attribution is disabled because HK-local factors are not configured.": [
+      "Hong Kong factor attribution is disabled because HK-local factors are not configured.",
+      "港股因子归因已关闭，因为当前未接入港股本土因子。",
+      "港股因子歸因已關閉，因為目前未接入港股本土因子。",
     ],
     "Japan market factor attribution is not supported yet.": [
       "Japan market factor attribution is not supported yet.",

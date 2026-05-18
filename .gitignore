@@ -22,6 +22,7 @@ wheels/
 
 # Virtual environments
 .venv/
+.venv311/
 env/
 venv/
 ENV/
@@ -54,6 +55,10 @@ data/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Crisis warning retrain artifacts
+artifacts/crisis_warning/_backup_*/
+artifacts/crisis_warning/_retrain_staging_*/
 
 # Secrets
 .env

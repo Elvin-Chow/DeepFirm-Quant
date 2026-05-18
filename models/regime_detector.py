@@ -10,7 +10,7 @@ from sklearn.cluster import KMeans
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 
-from data_pipeline import MarketAligner, SmartFetcher
+from data_pipeline import DataQuality, MarketAligner, SmartFetcher
 from models.market_validation import MarketMode
 from models.ml_diagnostics import MLModelDiagnostics, diagnostics_from_frame
 from models.request_validation import (
@@ -70,6 +70,7 @@ class MarketRegimeResult(BaseModel):
     source: str = Field(default="unknown", description="Data source used for prices")
     source_detail: str = Field(default="unknown", description="Detailed price data provenance")
     data_warnings: List[str] = Field(default_factory=list, description="Non-fatal data quality warnings")
+    data_quality: DataQuality = Field(default_factory=DataQuality, description="Unified data quality provenance")
     diagnostics: Optional[MLModelDiagnostics] = Field(default=None)
 
 

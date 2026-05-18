@@ -1,35 +1,27 @@
 "use client";
 
+import { useState } from "react";
 import type { ElementType, ReactNode } from "react";
 import { CrisisWarningDriver, CrisisWarningResult } from "@/types/api";
 import { t, Lang } from "@/lib/i18n";
 import { localizeModelHealth, localizeWarning } from "@/lib/statusText";
 import Loading from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
-import ThemedTooltip from "@/components/charts/ThemedTooltip";
 import {
   Activity,
   AlertTriangle,
   BarChart3,
   CheckCircle2,
+  ChevronDown,
   Gauge,
+  Globe2,
   Info,
+  LockKeyhole,
   ShieldCheck,
   Target,
   TrendingDown,
-  TrendingUp,
+  X,
 } from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
 interface CrisisWarningTabProps {
   crisisWarning: CrisisWarningResult | null;
@@ -64,6 +56,18 @@ const toneBar: Record<Tone, string> = {
   neutral: "bg-slate-400",
 };
 
+const toneHex: Record<Tone, string> = {
+  good: "#10b981",
+  warn: "#f97316",
+  danger: "#ef4444",
+  accent: "#0ea5e9",
+  neutral: "#64748b",
+};
+
+function iconToneClass(tone: Tone): string {
+  return `${toneText[tone]} dark:brightness-125 dark:drop-shadow-[0_0_10px_currentColor]`;
+}
+
 function byLang(lang: Lang, en: string, zh: string, tc: string): string {
   if (lang === "zh") return zh;
   if (lang === "tc") return tc;
@@ -89,6 +93,119 @@ function localizeRiskLevel(level: string | undefined, lang: Lang): string {
   return key ? t(lang, key) : level;
 }
 
+function formatMarketScope(scope: string[] | undefined): string {
+  const labels: Record<string, string> = {
+    us: "US",
+    hk: "HK",
+    cn: "CN",
+    jp: "JP",
+    tw: "TW",
+  };
+  const values = (scope ?? [])
+    .map((market) => labels[String(market).toLowerCase()] ?? String(market).toUpperCase())
+    .filter(Boolean);
+  return values.length > 0 ? values.join(" / ") : "--";
+}
+
+function shortHash(value: string | undefined): string {
+  const hash = (value ?? "").trim();
+  if (!hash) return "--";
+  if (hash.length <= 14) return hash;
+  return `${hash.slice(0, 8)}...${hash.slice(-4)}`;
+}
+
+function localizeValidationStatus(status: string | undefined, lang: Lang): string {
+  const normalized = (status ?? "").trim().toLowerCase();
+  if (normalized === "ok") return byLang(lang, "OK", "正常", "正常");
+  if (normalized === "partial_market_coverage") {
+    return byLang(lang, "Partial coverage", "覆盖不完整", "覆蓋不完整");
+  }
+  if (normalized === "degraded_validation") {
+    return byLang(lang, "Degraded validation", "验证降级", "驗證降級");
+  }
+  return status ? status : "--";
+}
+
+function validationTone(status: string | undefined): Tone {
+  const normalized = (status ?? "").trim().toLowerCase();
+  if (normalized === "ok") return "good";
+  if (normalized) return "warn";
+  return "neutral";
+}
+
+function globalArtifactLabel(isComplete: boolean, lang: Lang): string {
+  return isComplete
+    ? byLang(lang, "Complete", "完整", "完整")
+    : byLang(lang, "Partial", "不完整", "不完整");
+}
+
+function degradedWarningText(result: CrisisWarningResult, lang: Lang): string | null {
+  const diagnostics = result.diagnostics;
+  const validationStatus = (diagnostics.validation_status ?? "").trim().toLowerCase();
+  if (
+    diagnostics.model_health === "ok" &&
+    validationStatus === "ok" &&
+    diagnostics.is_global_complete
+  ) {
+    return null;
+  }
+  if (!diagnostics.is_global_complete) {
+    return byLang(
+      lang,
+      "This artifact does not cover every required global market. Treat the warning as degraded outside covered markets.",
+      "当前模型文件未覆盖全部必需全球市场；在覆盖范围之外应按降级信号处理。",
+      "目前模型檔案未覆蓋全部必需全球市場；在覆蓋範圍之外應按降級訊號處理。"
+    );
+  }
+  if (validationStatus && validationStatus !== "ok") {
+    return byLang(
+      lang,
+      "Validation status is degraded. Treat the probability as contextual and cross-check with ES, anomaly, and regime panels.",
+      "验证状态已降级；请把概率作为上下文信号，并与 ES、异常检测和市场状态交叉确认。",
+      "驗證狀態已降級；請把概率作為上下文訊號，並與 ES、異常偵測和市場狀態交叉確認。"
+    );
+  }
+  if (diagnostics.model_health !== "ok") {
+    return byLang(
+      lang,
+      "Model health is degraded. Review diagnostics before using this warning in a decision workflow.",
+      "模型健康状态已降级；进入决策流程前请先复核诊断信息。",
+      "模型健康狀態已降級；進入決策流程前請先複核診斷資訊。"
+    );
+  }
+  return null;
+}
+
+function localizeCrisisDiagnosticWarning(message: string, lang: Lang): string {
+  const trimmed = message.trim();
+  const validationStatus = trimmed.match(/^Crisis warning validation status is (.+)\.$/i);
+  if (validationStatus) {
+    return byLang(
+      lang,
+      `Crisis warning validation status is ${localizeValidationStatus(validationStatus[1], lang)}.`,
+      `危机预警验证状态为${localizeValidationStatus(validationStatus[1], lang)}。`,
+      `危機預警驗證狀態為${localizeValidationStatus(validationStatus[1], lang)}。`
+    );
+  }
+  if (trimmed === "Crisis warning validation tail-event count is below 250.") {
+    return byLang(
+      lang,
+      "Crisis warning validation tail-event count is below the reliability threshold.",
+      "危机预警验证尾部事件数低于可靠性阈值。",
+      "危機預警驗證尾部事件數低於可靠性閾值。"
+    );
+  }
+  if (trimmed === "Probability calibration artifact could not be read.") {
+    return byLang(
+      lang,
+      "Probability calibration artifact could not be read.",
+      "概率校准文件无法读取。",
+      "概率校準檔案無法讀取。"
+    );
+  }
+  return localizeWarning(trimmed, lang);
+}
+
 function formatPercent(value: number | undefined, digits = 1): string {
   if (value === undefined || !Number.isFinite(value)) return "--";
   return `${(value * 100).toFixed(digits)}%`;
@@ -103,10 +220,6 @@ function formatContribution(value: number, fallbackUsed: boolean): string {
   if (!Number.isFinite(value)) return "--";
   if (fallbackUsed) return value.toFixed(4);
   return `${(value * 100).toFixed(2)} pp`;
-}
-
-function compactFeatureName(value: string): string {
-  return value.length > 24 ? `${value.slice(0, 21)}...` : value;
 }
 
 function featureCopy(feature: string, lang: Lang): { label: string; meaning: string } {
@@ -336,22 +449,34 @@ function decisionFocusText(result: CrisisWarningResult, confidence: ReturnType<t
   );
 }
 
-function targetDefinitionText(result: CrisisWarningResult, lang: Lang): string {
-  const horizon = result.horizon;
-  if (result.target_definition.toLowerCase().includes("trailing")) {
-    return byLang(
-      lang,
-      `Tail event means the next ${horizon} trading-day portfolio log return falls below the rolling historical tail threshold. The threshold is shifted backward, so future data is not used when forming today's warning.`,
-      `这里的尾部事件指：组合未来 ${horizon} 个交易日的对数收益，跌破滚动历史尾部阈值。阈值已向前滞后一日，所以今天的预警不会偷看未来数据。`,
-      `這裡的尾部事件指：組合未來 ${horizon} 個交易日的對數收益，跌破滾動歷史尾部閾值。閾值已向前滯後一日，所以今天的預警不會偷看未來資料。`
-    );
-  }
-  return result.target_definition;
-}
-
 function clampPercent(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, value * 100));
+}
+
+function clampRatio(value: number | undefined, max = 1): number {
+  if (value === undefined || !Number.isFinite(value) || max <= 0) return 0;
+  return Math.max(0, Math.min(100, (value / max) * 100));
+}
+
+function comparisonScaleMax(probability: number, baseRate: number | undefined): number {
+  const highest = Math.max(
+    Number.isFinite(probability) ? probability : 0,
+    baseRate !== undefined && Number.isFinite(baseRate) ? baseRate : 0
+  );
+  return Math.max(0.1, Math.ceil(highest * 20) / 20);
+}
+
+function formatScalePercent(value: number): string {
+  if (!Number.isFinite(value)) return "--";
+  return `${(value * 100).toFixed(value < 0.1 ? 1 : 0)}%`;
+}
+
+function niceContributionLimit(values: number[], fallbackUsed: boolean): number {
+  const highest = Math.max(0, ...values.map((value) => Math.abs(value)));
+  if (highest <= 0) return fallbackUsed ? 1 : 3;
+  if (fallbackUsed) return Math.max(0.1, Math.ceil(highest * 10) / 10);
+  return Math.max(1, Math.ceil(highest));
 }
 
 function Panel({
@@ -443,56 +568,36 @@ function MetricBlock({
   );
 }
 
-function SignalTile({
+function SummaryTile({
   icon: Icon,
   label,
   value,
   tone,
-}: {
-  icon: ElementType;
-  label: string;
-  value: string;
-  tone: Tone;
-}) {
-  return (
-    <div className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] gap-3 border-t border-black/[0.07] py-3 first:border-t-0 dark:border-white/[0.08]">
-      <div className="flex h-8 w-8 items-center justify-center">
-        <Icon size={20} className={toneText[tone]} />
-      </div>
-      <div className="min-w-0">
-        <div className="min-w-0 truncate text-[11px] font-semibold uppercase text-df-text-secondary">{label}</div>
-        <div className={`mt-1 truncate text-lg font-semibold leading-tight ${toneText[tone]}`}>{value}</div>
-      </div>
-    </div>
-  );
-}
-
-function ReadingMetric({
-  icon: Icon,
-  label,
-  value,
   detail,
-  tone,
 }: {
   icon: ElementType;
   label: string;
   value: string;
-  detail: string;
   tone: Tone;
+  detail?: string;
 }) {
   return (
-    <div className="min-w-0 border-t border-black/[0.07] py-3 dark:border-white/[0.08]">
-      <div className="flex min-w-0 items-center gap-2">
-        <Icon size={14} className={`${toneText[tone]} shrink-0`} />
-        <div className="min-w-0 truncate text-[10px] font-semibold uppercase text-df-text-secondary">{label}</div>
+    <div className="flex min-h-[8.5rem] min-w-0 flex-col justify-center rounded-md border border-black/[0.07] bg-white/64 px-4 py-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_8px_20px_-22px_rgba(15,23,42,0.32)] dark:border-white/[0.08] dark:bg-white/[0.035]">
+      <div className="flex min-w-0 items-center justify-center gap-2 text-[11px] font-semibold leading-snug text-df-text-secondary">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-current/20 bg-current/[0.06]">
+          <Icon size={15} className={iconToneClass(tone)} />
+        </span>
+        <span className="min-w-0 truncate">{label}</span>
       </div>
-      <div className={`mt-1 truncate text-lg font-semibold ${toneText[tone]}`}>{value}</div>
-      <div className="mt-1 text-xs leading-snug text-df-text-secondary">{detail}</div>
+      <div className="mt-3 flex h-9 min-w-0 items-center justify-center">
+        <div className={`min-w-0 truncate text-2xl font-semibold leading-none sm:text-3xl ${toneText[tone]}`}>{value}</div>
+      </div>
+      <div className="mt-1 h-4 truncate text-[11px] font-medium leading-4 text-df-text-secondary">{detail ?? ""}</div>
     </div>
   );
 }
 
-function ProbabilitySummary({
+function CrisisGauge({
   value,
   detail,
   tone,
@@ -502,139 +607,542 @@ function ProbabilitySummary({
   tone: Tone;
 }) {
   const percent = clampPercent(value);
+  const activeStrokeCap: "butt" | "round" = percent < 8 ? "butt" : "round";
+  const arcCenterX = 116;
+  const arcOpeningCentroidY = 72;
 
   return (
-    <div className="min-w-0">
-      <div className={`text-5xl font-semibold leading-none sm:text-6xl ${toneText[tone]}`}>
-        {formatPercent(value)}
+    <div className="mx-auto flex max-w-[19rem] flex-col items-center">
+      <div className="relative h-[128px] w-[230px] max-w-full">
+        <svg viewBox="0 0 220 124" className="h-full w-full overflow-visible [--gauge-track:rgba(15,23,42,0.09)] [--gauge-track-shadow:none] dark:[--gauge-track:rgba(226,232,240,0.22)] dark:[--gauge-track-shadow:0_0_16px_rgba(226,232,240,0.12)]" aria-hidden="true">
+          <path
+            d="M 28 102 A 82 82 0 0 1 192 102"
+            fill="none"
+            stroke="var(--gauge-track)"
+            strokeWidth="18"
+            strokeLinecap="butt"
+            pathLength={100}
+            style={{ filter: "var(--gauge-track-shadow)" }}
+          />
+          <path
+            d="M 28 102 A 82 82 0 0 1 192 102"
+            fill="none"
+            stroke={toneHex[tone]}
+            strokeWidth="18"
+            strokeLinecap={activeStrokeCap}
+            pathLength={100}
+            strokeDasharray={`${percent} ${100 - percent}`}
+          />
+          <text
+            x={arcCenterX}
+            y={arcOpeningCentroidY}
+            textAnchor="middle"
+            dominantBaseline="central"
+            className={`fill-current text-[38px] font-semibold sm:text-[44px] ${toneText[tone]}`}
+          >
+            {formatPercent(value)}
+          </text>
+        </svg>
       </div>
-      <div className="mt-3 text-sm leading-relaxed text-df-text-secondary">{detail}</div>
-      <div className="mt-5 h-2 overflow-hidden rounded-full bg-black/[0.07] dark:bg-white/[0.08]">
-        <div className={`h-full rounded-full ${toneBar[tone]}`} style={{ width: `${percent}%` }} />
-      </div>
-      <div className="mt-2 grid grid-cols-4 text-[11px] font-medium text-df-text-secondary">
-        <span>0</span>
-        <span className="text-center">25</span>
-        <span className="text-center">50</span>
-        <span className="text-right">100</span>
+      <div className="mt-1 max-w-[18rem] text-center text-xs font-medium leading-relaxed text-df-text-secondary">
+        {detail}
       </div>
     </div>
   );
 }
 
-function ReadingPoint({
+function ProbabilityComparisonRail({
+  probability,
+  baseRate,
+  lang,
+}: {
+  probability: number;
+  baseRate: number | undefined;
+  lang: Lang;
+}) {
+  const scaleMax = comparisonScaleMax(probability, baseRate);
+  const probabilityPosition = clampRatio(probability, scaleMax);
+  const baseRatePosition = clampRatio(baseRate, scaleMax);
+
+  return (
+    <div className="mx-auto w-full max-w-5xl rounded-md border border-black/[0.07] bg-white/62 px-5 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)] dark:border-white/[0.08] dark:bg-white/[0.035]">
+      <div className="grid gap-2 text-center text-xs font-semibold text-df-text-secondary sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+        <span>
+          {byLang(lang, "Current crisis probability", "当前危机概率", "目前危機概率")}
+          <b className="ml-2 text-emerald-600 dark:text-emerald-300">{formatPercent(probability)}</b>
+        </span>
+        <span className="hidden px-5 text-df-text sm:block">vs</span>
+        <span>
+          {byLang(lang, "Training tail-event rate", "训练尾部事件率", "訓練尾部事件率")}
+          <b className="ml-2 text-df-text-secondary">{formatPercent(baseRate, 2)}</b>
+        </span>
+      </div>
+      <div className="relative mt-3 h-4">
+        <div className="absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-black/[0.09] dark:bg-white/[0.08]" />
+        <span
+          className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.2)]"
+          style={{ left: `${probabilityPosition}%` }}
+        />
+        {baseRate !== undefined && Number.isFinite(baseRate) && (
+          <span
+            className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-slate-500 shadow-[0_0_0_2px_rgba(100,116,139,0.18)]"
+            style={{ left: `${baseRatePosition}%` }}
+          />
+        )}
+      </div>
+      <div className="grid grid-cols-3 text-[11px] font-medium text-df-text-secondary">
+        <span>0%</span>
+        <span className="text-center">{formatScalePercent(scaleMax / 2)}</span>
+        <span className="text-right">{formatScalePercent(scaleMax)}</span>
+      </div>
+    </div>
+  );
+}
+
+function EvidenceBoardChart({
+  drivers,
+  riskDriverCount,
+  fallbackUsed,
+  lang,
+}: {
+  drivers: Array<CrisisWarningDriver & { chart_value: number }>;
+  riskDriverCount: number;
+  fallbackUsed: boolean;
+  lang: Lang;
+}) {
+  if (drivers.length === 0) {
+    return (
+      <div className="grid h-full min-h-[220px] place-items-center rounded-md border border-black/[0.07] bg-black/[0.015] text-sm text-df-text-secondary dark:border-white/[0.08] dark:bg-white/[0.03]">
+        {t(lang, "driverDataUnavailable")}
+      </div>
+    );
+  }
+
+  const limit = niceContributionLimit(drivers.map((driver) => driver.chart_value), fallbackUsed);
+  const axisLabel = (value: number) => fallbackUsed ? value.toFixed(1) : value.toFixed(0);
+
+  return (
+    <div className="flex h-full min-w-0 flex-col">
+      <div className="flex flex-1 flex-col justify-between gap-2">
+        {drivers.map((driver, index) => {
+          const copy = featureCopy(driver.feature, lang);
+          const value = driver.chart_value;
+          const isRiskDriver = value >= 0;
+          const width = limit > 0 ? Math.max(4, Math.min(50, (Math.abs(value) / limit) * 50)) : 0;
+          const valueLabel = fallbackUsed
+            ? value.toFixed(4)
+            : `${value >= 0 ? "+" : ""}${value.toFixed(2)} pp`;
+          const hasSeparator = index === riskDriverCount && riskDriverCount > 0;
+
+          return (
+            <div
+              key={`${driver.feature}-${driver.direction}`}
+              className={`grid min-w-0 grid-cols-[minmax(6.5rem,0.95fr)_minmax(9rem,1.65fr)_4.75rem] items-center gap-3 py-2 text-sm ${
+                hasSeparator ? "mt-3 border-t border-dashed border-black/[0.12] pt-3 dark:border-white/[0.12]" : ""
+              }`}
+            >
+              <div className="min-w-0 truncate font-medium text-df-text-secondary" title={copy.label}>
+                {copy.label}
+              </div>
+              <div className="relative h-8 min-w-0">
+                <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-slate-400/70" />
+                <span className="absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-black/[0.06] dark:bg-white/[0.08]" />
+                <span
+                  className={`absolute top-1/2 h-3.5 -translate-y-1/2 rounded ${isRiskDriver ? "bg-gradient-to-r from-rose-400 to-red-500" : "bg-gradient-to-l from-emerald-400 to-emerald-600"}`}
+                  style={
+                    isRiskDriver
+                      ? { left: "50%", width: `${width}%` }
+                      : { right: "50%", width: `${width}%` }
+                  }
+                />
+              </div>
+              <div className={`truncate text-right font-mono text-xs font-semibold ${isRiskDriver ? toneText.danger : toneText.good}`}>
+                {valueLabel}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-2 grid grid-cols-[minmax(6.5rem,0.95fr)_minmax(9rem,1.65fr)_4.75rem] gap-3 text-[11px] font-medium text-df-text-secondary">
+        <span />
+        <div className="grid grid-cols-5">
+          <span>{axisLabel(-limit)}</span>
+          <span className="text-center">{axisLabel(-limit / 2)}</span>
+          <span className="text-center">0</span>
+          <span className="text-center">{axisLabel(limit / 2)}</span>
+          <span className="text-right">{axisLabel(limit)}</span>
+        </div>
+        <span />
+      </div>
+    </div>
+  );
+}
+
+function ContributionRanking({
+  drivers,
+  lang,
+  fallbackUsed,
+}: {
+  drivers: Array<CrisisWarningDriver & { chart_value: number }>;
+  lang: Lang;
+  fallbackUsed: boolean;
+}) {
+  const ranked = [...drivers]
+    .sort((left, right) => Math.abs(right.chart_value) - Math.abs(left.chart_value))
+    .slice(0, 3);
+
+  return (
+    <div className="flex h-full min-w-0 flex-col border-l border-black/[0.08] pl-5 dark:border-white/[0.08]">
+      <div className="mb-3 text-[11px] font-semibold uppercase tracking-normal text-df-text-secondary">
+        {byLang(lang, "Contribution", "贡献值", "貢獻值")}
+      </div>
+      <div className="flex flex-1 flex-col justify-around gap-4">
+        {ranked.length === 0 ? (
+          <div className="text-sm text-df-text-secondary">{t(lang, "driverDataUnavailable")}</div>
+        ) : ranked.map((driver, index) => {
+          const copy = featureCopy(driver.feature, lang);
+          const tone = driver.chart_value >= 0 ? "danger" : "good";
+          return (
+            <div key={`${driver.feature}-${index}`} className="grid min-w-0 grid-cols-[1.5rem_minmax(0,1fr)] gap-3">
+              <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-center font-mono text-[12px] font-bold leading-none text-white ${driver.chart_value >= 0 ? "bg-rose-500" : "bg-emerald-500"}`}>
+                {index + 1}
+              </span>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-df-text">{copy.label}</div>
+                <div className={`mt-1 font-mono text-xs font-semibold ${toneText[tone]}`}>
+                  {formatContribution(driver.shap_value, fallbackUsed)}
+                </div>
+                <div className="mt-1 text-xs leading-relaxed text-df-text-secondary">{copy.meaning}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ReliabilityRow({
   icon: Icon,
-  title,
-  children,
-  tone = "accent",
+  label,
+  value,
+  tone,
+  progress,
 }: {
   icon: ElementType;
-  title: string;
-  children: ReactNode;
+  label: string;
+  value: string;
+  tone: Tone;
+  progress?: number;
+}) {
+  const boundedProgress = progress === undefined ? undefined : Math.max(4, Math.min(100, progress));
+
+  return (
+    <div className="grid min-w-0 grid-cols-[1.25rem_minmax(0,1fr)] gap-3 border-b border-black/[0.07] py-2.5 last:border-b-0 dark:border-white/[0.08]">
+      <Icon size={18} className={`${iconToneClass(tone)} shrink-0`} />
+      <div className="min-w-0">
+        <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <div className="min-w-0 text-sm font-medium text-df-text-secondary">{label}</div>
+          <div className={`max-w-full break-words text-right text-sm font-semibold leading-snug ${toneText[tone]}`}>{value}</div>
+        </div>
+        <div className="mt-2 h-1.5 min-w-0 overflow-hidden rounded-full bg-black/[0.1] dark:bg-white/[0.1]">
+          {boundedProgress !== undefined && (
+            <div className={`h-full rounded-full ${toneBar[tone]}`} style={{ width: `${boundedProgress}%` }} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModelReliabilityPanel({
+  result,
+  confidence,
+  validationStatusLabel,
+  validationStatusTone,
+  calibrationLabel,
+  coveredScopeLabel,
+  globalArtifactTone,
+  onOpenAudit,
+  lang,
+}: {
+  result: CrisisWarningResult;
+  confidence: ReturnType<typeof confidenceLabel>;
+  validationStatusLabel: string;
+  validationStatusTone: Tone;
+  calibrationLabel: string;
+  coveredScopeLabel: string;
+  globalArtifactTone: Tone;
+  onOpenAudit: () => void;
+  lang: Lang;
+}) {
+  const metrics = result.diagnostics.validation_metrics;
+  const calibrationTone: Tone = result.diagnostics.probability_calibrated ? "good" : "neutral";
+  const validationProgress = validationStatusTone === "good" ? 92 : validationStatusTone === "warn" ? 56 : 16;
+  const calibrationProgress = result.diagnostics.probability_calibrated ? 96 : 35;
+
+  return (
+    <Panel>
+      <div className="p-4 sm:p-5 xl:p-6">
+        <SectionTitle icon={ShieldCheck} title={byLang(lang, "Model reliability", "模型可靠性", "模型可靠性")} />
+        <div className="space-y-0">
+          <ReliabilityRow
+            icon={ShieldCheck}
+            label={byLang(lang, "Model confidence", "模型健康", "模型健康")}
+            value={confidence.label}
+            tone={confidence.tone}
+            progress={confidence.tone === "good" ? 86 : confidence.tone === "warn" ? 54 : 68}
+          />
+          <ReliabilityRow
+            icon={Gauge}
+            label={t(lang, "validationStatus")}
+            value={validationStatusLabel}
+            tone={validationStatusTone}
+            progress={validationProgress}
+          />
+          <ReliabilityRow
+            icon={Activity}
+            label="ROC AUC"
+            value={formatNumber(metrics.roc_auc, 2)}
+            tone="accent"
+            progress={clampPercent(metrics.roc_auc)}
+          />
+          <ReliabilityRow
+            icon={TrendingDown}
+            label="PR AUC"
+            value={formatNumber(metrics.pr_auc, 2)}
+            tone="warn"
+            progress={clampPercent(metrics.pr_auc)}
+          />
+          <ReliabilityRow
+            icon={ShieldCheck}
+            label={t(lang, "probabilityCalibration")}
+            value={calibrationLabel}
+            tone={calibrationTone}
+            progress={calibrationProgress}
+          />
+          <ReliabilityRow
+            icon={Globe2}
+            label={t(lang, "marketScope")}
+            value={coveredScopeLabel}
+            tone={globalArtifactTone}
+            progress={globalArtifactTone === "good" ? 100 : 64}
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={onOpenAudit}
+          className="group mt-4 flex w-full min-w-0 items-center justify-between gap-3 rounded-md border border-black/[0.08] bg-white/60 px-4 py-3 text-left transition-colors hover:bg-white/80 dark:border-white/[0.08] dark:bg-white/[0.035] dark:hover:bg-white/[0.07]"
+        >
+            <div className="flex min-w-0 items-center gap-3">
+              <LockKeyhole size={18} className="shrink-0 text-df-text dark:text-white dark:drop-shadow-[0_0_10px_rgba(255,255,255,0.42)]" />
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-df-text">{byLang(lang, "Technical audit", "技术审计", "技術審計")}</div>
+                <div className="text-xs leading-snug text-df-text-secondary">
+                  {byLang(lang, "Model metadata, training window, hashes, and sample statistics.", "模型信息、训练详情、特征哈希、样本统计等。", "模型資訊、訓練詳情、特徵雜湊、樣本統計等。")}
+                </div>
+              </div>
+            </div>
+          <ChevronDown size={18} className="-rotate-90 shrink-0 text-df-text-secondary transition-transform group-hover:translate-x-0.5" />
+        </button>
+      </div>
+    </Panel>
+  );
+}
+
+function AuditMetric({
+  label,
+  value,
+  detail,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  detail?: string;
   tone?: Tone;
 }) {
   return (
-    <div className="min-w-0 border-t border-black/[0.07] pt-4 dark:border-white/[0.08]">
-      <div className="mb-3 flex min-w-0 items-center gap-2 text-base font-semibold text-df-text">
-        <Icon size={18} className={`${toneText[tone]} shrink-0`} />
-        <span className="min-w-0 truncate">{title}</span>
-      </div>
-      <div className="text-sm leading-7 text-df-text-secondary sm:text-base">{children}</div>
+    <div className="min-w-0 rounded-md border border-slate-200 bg-white p-4 shadow-[0_10px_24px_-22px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.92)] dark:border-white/[0.1] dark:bg-[#202728] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+      <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-600 dark:text-df-text-secondary">{label}</div>
+      <div className={`mt-2 break-words text-lg font-semibold leading-tight ${toneText[tone]}`}>{value}</div>
+      {detail && <div className="mt-2 break-words text-sm leading-relaxed text-slate-600 dark:text-df-text-secondary">{detail}</div>}
     </div>
   );
 }
 
-function DriverRow({
-  driver,
+function TechnicalAuditModal({
+  open,
+  onClose,
+  result,
+  requiredScopeLabel,
+  coveredScopeLabel,
+  skippedScopeLabel,
+  validationDetail,
+  windowLabel,
   lang,
-  fallbackUsed,
-  tone,
-  maxMagnitude,
 }: {
-  driver: CrisisWarningDriver;
+  open: boolean;
+  onClose: () => void;
+  result: CrisisWarningResult;
+  requiredScopeLabel: string;
+  coveredScopeLabel: string;
+  skippedScopeLabel: string;
+  validationDetail: string;
+  windowLabel: string;
   lang: Lang;
-  fallbackUsed: boolean;
-  tone: Tone;
-  maxMagnitude: number;
 }) {
-  const copy = featureCopy(driver.feature, lang);
-  const magnitude = maxMagnitude > 0 ? Math.max(5, Math.min(100, (Math.abs(driver.shap_value) / maxMagnitude) * 100)) : 0;
+  if (!open) return null;
+
+  const healthTone: Tone = result.diagnostics.model_health === "ok" ? "good" : "warn";
+  const validationStatusLabel = localizeValidationStatus(result.diagnostics.validation_status, lang);
+  const validationStatusTone = validationTone(result.diagnostics.validation_status);
+
   return (
-    <div className="py-3">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7.25rem] sm:items-start">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-df-text">{copy.label}</div>
-          <div className="mt-0.5 truncate font-mono text-[11px] text-df-text-secondary">{driver.feature}</div>
-          <div className="mt-1 text-xs leading-snug text-df-text-secondary">{copy.meaning}</div>
-        </div>
-        <div className="min-w-0 sm:text-right">
-          <div className={`font-mono text-sm font-semibold ${toneText[tone]}`}>
-            {formatContribution(driver.shap_value, fallbackUsed)}
+    <div className="mobile-audit-modal fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+      <button
+        type="button"
+        aria-label={byLang(lang, "Close technical audit", "关闭技术审计", "關閉技術審計")}
+        className="absolute inset-0 bg-slate-950/18 backdrop-blur-[2px] dark:bg-black/60 dark:backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label={byLang(lang, "Technical audit", "技术审计", "技術審計")}
+        className="mobile-audit-dialog relative max-h-[82vh] w-full max-w-4xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_30px_90px_-34px_rgba(15,23,42,0.72),inset_0_1px_0_rgba(255,255,255,0.94)] dark:border-white/[0.14] dark:bg-[#171c1d] dark:shadow-[0_30px_100px_-34px_rgba(0,0,0,0.95),inset_0_1px_0_rgba(255,255,255,0.08)]"
+      >
+        <div className="flex min-w-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 dark:border-white/[0.1] dark:bg-[#1c2223]">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-50 dark:border-white/[0.14] dark:bg-white/[0.08]">
+              <LockKeyhole size={18} className="text-df-text dark:text-white dark:drop-shadow-[0_0_10px_rgba(255,255,255,0.42)]" />
+            </span>
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold text-df-text">{byLang(lang, "Technical audit", "技术审计", "技術審計")}</h3>
+              <p className="mt-1 text-sm leading-relaxed text-df-text-secondary">
+                {byLang(
+                  lang,
+                  "Model metadata, training window, artifact hashes, market scope, and validation statistics.",
+                  "模型信息、训练窗口、文件哈希、市场覆盖与验证统计。",
+                  "模型資訊、訓練窗口、檔案雜湊、市場覆蓋與驗證統計。"
+                )}
+              </p>
+            </div>
           </div>
-          <div className="mt-1 font-mono text-[10px] text-df-text-secondary">
-            {t(lang, "featureValue")}: {formatNumber(driver.feature_value)}
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:border-slate-300 hover:text-slate-900 dark:border-white/[0.12] dark:bg-white/[0.06] dark:text-df-text-secondary dark:hover:text-white"
+            aria-label={byLang(lang, "Close", "关闭", "關閉")}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="mobile-audit-body max-h-[calc(82vh-5rem)] overflow-y-auto bg-slate-50/80 p-5 dark:bg-[#111617]">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <AuditMetric label={t(lang, "modelName")} value={result.model_name} detail={result.model_version} />
+            <AuditMetric label={t(lang, "trainingWindow")} value={windowLabel} />
+            <AuditMetric
+              label={t(lang, "modelHealth")}
+              value={localizeModelHealth(result.diagnostics.model_health, lang)}
+              detail={validationDetail}
+              tone={healthTone}
+            />
+            <AuditMetric
+              label={t(lang, "validationStatus")}
+              value={validationStatusLabel}
+              detail={validationDetail}
+              tone={validationStatusTone}
+            />
+            <AuditMetric label={t(lang, "requiredScope")} value={requiredScopeLabel} />
+            <AuditMetric label={t(lang, "coveredScope")} value={coveredScopeLabel} detail={`${t(lang, "skippedScope")}: ${skippedScopeLabel}`} />
+            <AuditMetric label={t(lang, "artifactHash")} value={shortHash(result.diagnostics.artifact_hash)} detail={result.diagnostics.artifact_hash || "--"} />
+            <AuditMetric label={t(lang, "featureSchemaHash")} value={shortHash(result.diagnostics.feature_schema_hash)} detail={result.diagnostics.feature_schema_hash || "--"} />
+            <AuditMetric
+              label={t(lang, "validationPositiveEvents")}
+              value={result.diagnostics.validation_positive_events.toLocaleString()}
+              detail={validationDetail}
+            />
+            <AuditMetric
+              label={t(lang, "positiveRate")}
+              value={formatPercent(result.diagnostics.positive_rate, 2)}
+              detail={byLang(lang, "Training tail-event frequency.", "训练尾部事件频率。", "訓練尾部事件頻率。")}
+            />
+            <AuditMetric label={byLang(lang, "Feature count", "特征数量", "特徵數量")} value={result.diagnostics.feature_count.toLocaleString()} />
+            <AuditMetric label={byLang(lang, "Rows", "训练行数", "訓練列數")} value={result.diagnostics.n_training_rows.toLocaleString()} />
           </div>
         </div>
-      </div>
-      <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/[0.08]">
-        <div className={`h-full rounded-full ${toneBar[tone]}`} style={{ width: `${magnitude}%` }} />
-      </div>
+      </section>
     </div>
   );
 }
 
-function DriverColumn({
-  icon: Icon,
-  title,
-  drivers,
-  emptyText,
-  lang,
+function DiagnosticsWarningPanel({
+  mainMessage,
+  warnings,
   fallbackUsed,
-  tone,
-  maxMagnitude,
-  hiddenCount,
+  lang,
 }: {
-  icon: ElementType;
-  title: string;
-  drivers: CrisisWarningDriver[];
-  emptyText: string;
-  lang: Lang;
+  mainMessage: string | null;
+  warnings: string[];
   fallbackUsed: boolean;
-  tone: Tone;
-  maxMagnitude: number;
-  hiddenCount: number;
+  lang: Lang;
 }) {
+  const details = [
+    ...(fallbackUsed ? [t(lang, "shapFallback")] : []),
+    ...warnings.map((warning) => localizeCrisisDiagnosticWarning(warning, lang)),
+  ];
+
   return (
-    <div className="min-w-0">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2 text-base font-semibold text-df-text">
-          <Icon size={16} className={toneText[tone]} />
-          <span className="truncate">{title}</span>
-        </div>
-        {hiddenCount > 0 && (
-          <span className="shrink-0 text-[11px] text-df-text-secondary">
-            +{hiddenCount}
-          </span>
+    <Panel>
+      <div className="p-3 sm:p-4">
+        {details.length > 0 ? (
+          <details className="group">
+            <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
+              <span className="flex min-w-0 items-start gap-3 text-sm leading-relaxed text-amber-700 dark:text-amber-200">
+                <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-200 dark:drop-shadow-[0_0_10px_rgba(251,191,36,0.5)]" />
+                <span>{mainMessage ?? byLang(lang, "Diagnostics require attention.", "诊断信息需要关注。", "診斷資訊需要關注。")}</span>
+              </span>
+              <span className="inline-flex shrink-0 items-center gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-200">
+                {byLang(lang, "Detailed diagnostics", "详细诊断", "詳細診斷")}
+                <ChevronDown size={15} className="transition-transform group-open:rotate-180" />
+              </span>
+            </summary>
+            <div className="mt-3 flex flex-wrap gap-2 border-t border-black/[0.07] pt-3 dark:border-white/[0.08]">
+              {details.map((detail) => (
+                <span
+                  key={detail}
+                  className="inline-block max-w-full break-words rounded-full border border-df-border bg-df-surface-solid/20 px-3 py-1.5 text-xs leading-relaxed text-df-text-secondary"
+                >
+                  {detail}
+                </span>
+              ))}
+            </div>
+          </details>
+        ) : (
+          <div className="flex items-start gap-3 text-sm leading-relaxed text-amber-700 dark:text-amber-200">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-200 dark:drop-shadow-[0_0_10px_rgba(251,191,36,0.5)]" />
+            <span>{mainMessage ?? byLang(lang, "Diagnostics require attention.", "诊断信息需要关注。", "診斷資訊需要關注。")}</span>
+          </div>
         )}
       </div>
-      {drivers.length === 0 ? (
-        <div className="border-t border-black/[0.08] py-3 text-sm text-df-text-secondary dark:border-white/[0.08]">
-          {emptyText}
-        </div>
-      ) : (
-        <div className="divide-y divide-black/[0.07] dark:divide-white/[0.08]">
-          {drivers.map((driver) => (
-            <DriverRow
-              key={driver.feature}
-              driver={driver}
-              lang={lang}
-              fallbackUsed={fallbackUsed}
-              tone={tone}
-              maxMagnitude={maxMagnitude}
-            />
-          ))}
-        </div>
-      )}
+    </Panel>
+  );
+}
+
+function FooterNotice({
+  icon: Icon,
+  children,
+  tone,
+}: {
+  icon: ElementType;
+  children: ReactNode;
+  tone: Tone;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-3 px-5 py-4">
+      <Icon size={25} className={`${iconToneClass(tone)} shrink-0`} />
+      <div className="min-w-0 text-sm leading-relaxed text-df-text-secondary">{children}</div>
     </div>
   );
 }
@@ -645,6 +1153,8 @@ export default function CrisisWarningTab({
   hasAnalysisRun,
   lang,
 }: CrisisWarningTabProps) {
+  const [auditOpen, setAuditOpen] = useState(false);
+
   if (loading) return <Loading />;
   if (!crisisWarning) {
     return (
@@ -669,7 +1179,6 @@ export default function CrisisWarningTab({
     ...crisisWarning.diagnostics.warnings,
     ...(crisisWarning.data_warnings ?? []),
   ];
-  const localizedTargetDefinition = targetDefinitionText(crisisWarning, lang);
   const probabilityDetail = byLang(
     lang,
     `Estimated probability of entering a ${crisisWarning.horizon}D tail-risk event.`,
@@ -682,315 +1191,182 @@ export default function CrisisWarningTab({
     ...driver,
     chart_value: fallbackUsed ? driver.shap_value : driver.shap_value * 100,
   }));
-  const maxVisibleMagnitude = Math.max(
-    0,
-    ...visibleRiskDrivers.map((driver) => Math.abs(driver.shap_value)),
-    ...visibleReducers.map((driver) => Math.abs(driver.shap_value))
-  );
-  const hiddenRiskDriverCount = Math.max(0, crisisWarning.top_risk_drivers.length - visibleRiskDrivers.length);
-  const hiddenReducerCount = Math.max(0, crisisWarning.risk_reducers.length - visibleReducers.length);
   const decisionFocus = decisionFocusText(crisisWarning, confidence, lang);
   const validationDetail = `ROC AUC ${formatNumber(metrics.roc_auc, 2)} · PR AUC ${formatNumber(metrics.pr_auc, 2)}`;
   const calibrationLabel = crisisWarning.diagnostics.probability_calibrated ? t(lang, "calibrated") : t(lang, "rawProbability");
-  const readoutMetrics = [
-    {
-      icon: Activity,
-      label: t(lang, "crisisProbability"),
-      value: formatPercent(crisisWarning.crisis_probability),
-      detail: byLang(
-        lang,
-        `${crisisWarning.horizon}D estimated tail-event probability.`,
-        `${crisisWarning.horizon}D 尾部事件估计概率。`,
-        `${crisisWarning.horizon}D 尾部事件估計概率。`
-      ),
-      tone,
-    },
-    {
-      icon: BarChart3,
-      label: t(lang, "positiveRate"),
-      value: formatPercent(crisisWarning.diagnostics.positive_rate, 2),
-      detail: byLang(
-        lang,
-        "Training base rate for comparison.",
-        "用于对照的训练基准率。",
-        "用於對照的訓練基準率。"
-      ),
-      tone: "neutral" as Tone,
-    },
-    {
-      icon: Gauge,
-      label: t(lang, "probabilityCalibration"),
-      value: calibrationLabel,
-      detail: confidence.label,
-      tone: confidence.tone,
-    },
-    {
-      icon: ShieldCheck,
-      label: t(lang, "modelHealth"),
-      value: localizeModelHealth(crisisWarning.diagnostics.model_health, lang),
-      detail: validationDetail,
-      tone: crisisWarning.diagnostics.model_health === "ok" ? "good" as Tone : "warn" as Tone,
-    },
-  ];
+  const requiredScopeLabel = formatMarketScope(crisisWarning.diagnostics.required_market_scope);
+  const coveredScopeLabel = formatMarketScope(crisisWarning.diagnostics.covered_market_scope);
+  const skippedScopeLabel = formatMarketScope(crisisWarning.diagnostics.skipped_market_scope);
+  const validationStatusLabel = localizeValidationStatus(crisisWarning.diagnostics.validation_status, lang);
+  const validationStatusTone = validationTone(crisisWarning.diagnostics.validation_status);
+  const globalArtifactTone: Tone = crisisWarning.diagnostics.is_global_complete ? "good" : "warn";
+  const degradedWarning = degradedWarningText(crisisWarning, lang);
 
   return (
     <div className="space-y-3">
       <Panel className="overflow-hidden">
-        <div className="grid xl:grid-cols-[minmax(0,0.42fr)_minmax(20rem,0.31fr)_minmax(16rem,0.27fr)]">
+        <div className="grid xl:grid-cols-[minmax(20rem,0.38fr)_minmax(0,0.62fr)]">
           <div className="min-w-0 p-4 sm:p-5 xl:border-r xl:border-black/[0.07] xl:p-6 xl:dark:border-white/[0.08]">
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-semibold text-df-text-secondary">
-              <Activity size={16} className={toneText[tone]} />
-              <span>{t(lang, "crisisWarning")}</span>
+              <Activity size={16} className={toneText.good} />
+              <span>{byLang(lang, "Crisis warning overview", "危机预警概览", "危機預警概覽")}</span>
+            </div>
+            <div className="mt-4 flex min-w-0 flex-wrap items-center gap-3">
+              <h2 className="min-w-0 text-xl font-semibold leading-tight text-df-text sm:text-2xl">
+                {verdictTitle(crisisWarning, lang)}
+              </h2>
               <StatusBadge label={localizeRiskLevel(crisisWarning.warning_level, lang)} tone={tone} />
             </div>
-            <h2 className="mt-3 max-w-3xl text-xl font-semibold leading-tight text-df-text sm:text-2xl">
-              {verdictTitle(crisisWarning, lang)}
-            </h2>
-            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-df-text-secondary">
+            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-df-text-secondary">
               {verdictDetail(crisisWarning, lang)}
             </p>
-            <div className="mt-4 border-t border-black/[0.07] pt-3 dark:border-white/[0.08]">
-              <div className="text-[11px] font-semibold uppercase text-df-text-secondary">
-                {byLang(lang, "Action read", "操作读数", "操作讀數")}
+            <div className="mt-5 border-t border-black/[0.07] pt-4 dark:border-white/[0.08]">
+              <div className="text-sm font-semibold text-df-text">
+                {byLang(lang, "Action read", "操作读数", "操作讀數")}: {decisionFocus}
               </div>
-              <div className="mt-1 grid gap-2 lg:grid-cols-[10rem_minmax(0,1fr)]">
-                <div className="text-sm font-semibold text-df-text">{decisionFocus}</div>
-                <div className="text-sm leading-relaxed text-df-text-secondary">
-                  {driverSummary(crisisWarning.top_risk_drivers, crisisWarning.risk_reducers, lang)}
-                </div>
+              <div className="mt-3 text-sm leading-relaxed text-df-text-secondary">
+                {driverSummary(crisisWarning.top_risk_drivers, crisisWarning.risk_reducers, lang)}
               </div>
             </div>
           </div>
 
-          <div className="min-w-0 border-t border-black/[0.08] p-4 dark:border-white/[0.08] sm:p-5 xl:border-r xl:border-t-0 xl:border-black/[0.07] xl:p-6 xl:dark:border-white/[0.08]">
-            <div className="mb-3 flex min-w-0 items-center gap-2 text-sm font-semibold text-df-text">
-              <Info size={16} className="shrink-0 text-df-text-secondary" />
-              <span className="min-w-0 truncate">{t(lang, "crisisProbability")}</span>
-            </div>
-            <div className="mb-3 flex flex-wrap gap-2">
-              <StatusBadge label={confidence.label} tone={confidence.tone} />
-              <StatusBadge label={t(lang, "notTradingAdvice")} tone="neutral" />
-            </div>
-            <ProbabilitySummary
-              value={crisisWarning.crisis_probability}
-              detail={probabilityDetail}
-              tone={tone}
-            />
-          </div>
-
-          <div className="min-w-0 border-t border-black/[0.08] bg-black/[0.014] p-4 dark:border-white/[0.08] dark:bg-white/[0.025] sm:p-5 xl:border-t-0 xl:p-6">
-            <div className="grid gap-x-5 sm:grid-cols-2 xl:block">
-              <SignalTile icon={Target} label={t(lang, "horizon")} value={`${crisisWarning.horizon}D`} tone="accent" />
-              <SignalTile
-                icon={ShieldCheck}
-                label={t(lang, "modelHealth")}
-                value={localizeModelHealth(crisisWarning.diagnostics.model_health, lang)}
-                tone={crisisWarning.diagnostics.model_health === "ok" ? "good" : "warn"}
-              />
-              <SignalTile
-                icon={Gauge}
-                label={t(lang, "probabilityCalibration")}
-                value={crisisWarning.diagnostics.probability_calibrated ? t(lang, "calibrated") : t(lang, "rawProbability")}
-                tone={crisisWarning.diagnostics.probability_calibrated ? "good" : "neutral"}
-              />
-              <SignalTile
-                icon={BarChart3}
-                label={t(lang, "positiveRate")}
-                value={formatPercent(crisisWarning.diagnostics.positive_rate, 2)}
-                tone="neutral"
-              />
-            </div>
-          </div>
-        </div>
-      </Panel>
-
-      <Panel>
-        <div className="p-4 sm:p-5 xl:p-6">
-          <SectionTitle
-            icon={BarChart3}
-            title={byLang(lang, "Evidence board", "证据面板", "證據面板")}
-            right={<EvidenceLegend unitLabel={contributionUnit} lang={lang} />}
-          />
-          <div className="grid items-stretch gap-5 xl:grid-cols-[minmax(22rem,0.9fr)_minmax(18rem,0.55fr)_minmax(18rem,0.55fr)] xl:gap-0">
-            <div className="min-w-0 xl:pr-6">
-              {chartDrivers.length === 0 ? (
-                <div className="grid h-full min-h-[300px] place-items-center rounded-lg border border-black/[0.07] bg-black/[0.015] text-sm text-df-text-secondary dark:border-white/[0.08] dark:bg-white/[0.03] xl:min-h-[320px]">
-                  {t(lang, "driverDataUnavailable")}
+          <div className="min-w-0 border-t border-black/[0.08] p-4 dark:border-white/[0.08] sm:p-5 xl:border-t-0 xl:p-6">
+            <div className="grid items-center gap-6 xl:grid-cols-[minmax(18rem,0.44fr)_minmax(0,0.56fr)]">
+              <div className="min-w-0 xl:border-r xl:border-black/[0.07] xl:pr-6 xl:dark:border-white/[0.08]">
+                <div className="mb-3 flex min-w-0 items-center gap-2 text-sm font-semibold text-df-text">
+                  <span className="min-w-0 truncate">{t(lang, "crisisProbability")}</span>
+                  <Info size={15} className="shrink-0 text-df-text-secondary" />
                 </div>
-              ) : (
-                <div className="h-full min-h-[300px] min-w-0 xl:min-h-[320px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={chartDrivers}
-                      layout="vertical"
-                      margin={{ top: 4, right: 14, left: 4, bottom: 0 }}
-                      barCategoryGap={10}
-                    >
-                      <defs>
-                        <linearGradient id="riskDriverGradient" x1="0" y1="0" x2="1" y2="0">
-                          <stop offset="0%" stopColor="#fb7185" stopOpacity={0.88} />
-                          <stop offset="100%" stopColor="#ef4444" stopOpacity={0.95} />
-                        </linearGradient>
-                        <linearGradient id="riskReducerGradient" x1="1" y1="0" x2="0" y2="0">
-                          <stop offset="0%" stopColor="#34d399" stopOpacity={0.95} />
-                          <stop offset="100%" stopColor="#10b981" stopOpacity={0.86} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid horizontal={false} stroke="rgba(148,163,184,0.16)" />
-                      <ReferenceLine x={0} stroke="rgba(148,163,184,0.42)" strokeWidth={1} />
-                      <XAxis
-                        type="number"
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fontSize: 11, fill: "currentColor" }}
-                        tickFormatter={(value) => Number(value).toFixed(fallbackUsed ? 2 : 0)}
-                      />
-                      <YAxis
-                        type="category"
-                        dataKey="feature"
-                        width={158}
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fontSize: 11, fill: "currentColor" }}
-                        tickFormatter={(value) => compactFeatureName(featureCopy(String(value), lang).label)}
-                      />
-                      <Tooltip
-                        content={
-                          <ThemedTooltip
-                            formatter={(value) => [
-                              formatContribution(fallbackUsed ? Number(value) : Number(value) / 100, fallbackUsed),
-                              t(lang, "shapContribution"),
-                            ]}
-                          />
-                        }
-                      />
-                      <Bar dataKey="chart_value" radius={[5, 5, 5, 5]} isAnimationActive={false}>
-                        {chartDrivers.map((item) => (
-                          <Cell
-                            key={`${item.feature}-${item.direction}`}
-                            fill={item.chart_value >= 0 ? "url(#riskDriverGradient)" : "url(#riskReducerGradient)"}
-                          />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                <div className="mb-3 flex flex-wrap gap-2">
+                  <StatusBadge label={confidence.label} tone={confidence.tone} />
+                  <StatusBadge label={t(lang, "notTradingAdvice")} tone="neutral" />
                 </div>
-              )}
-            </div>
-            <div className="min-w-0 border-t border-black/[0.08] pt-4 dark:border-white/[0.08] xl:border-l xl:border-t-0 xl:pl-6 xl:pr-6 xl:pt-0 xl:dark:border-white/[0.08]">
-              <DriverColumn
-                icon={TrendingUp}
-                title={t(lang, "topRiskDrivers")}
-                drivers={visibleRiskDrivers}
-                emptyText={t(lang, "driverDataUnavailable")}
-                lang={lang}
-                fallbackUsed={fallbackUsed}
-                tone="danger"
-                maxMagnitude={maxVisibleMagnitude}
-                hiddenCount={hiddenRiskDriverCount}
-              />
-            </div>
-            <div className="min-w-0 border-t border-black/[0.08] pt-4 dark:border-white/[0.08] xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0 xl:dark:border-white/[0.08]">
-              <DriverColumn
-                icon={TrendingDown}
-                title={t(lang, "riskReducers")}
-                drivers={visibleReducers}
-                emptyText={t(lang, "driverDataUnavailable")}
-                lang={lang}
-                fallbackUsed={fallbackUsed}
-                tone="good"
-                maxMagnitude={maxVisibleMagnitude}
-                hiddenCount={hiddenReducerCount}
-              />
-            </div>
-          </div>
-        </div>
-      </Panel>
-
-      <div className="grid items-stretch gap-3 xl:grid-cols-[minmax(0,0.49fr)_minmax(0,0.51fr)]">
-        <Panel className="h-full">
-          <div className="p-4 sm:p-5 xl:p-6">
-            <SectionTitle icon={ShieldCheck} title={byLang(lang, "Model audit", "模型审计", "模型審計")} />
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <MetricBlock label={t(lang, "modelName")} value={crisisWarning.model_name} detail={crisisWarning.model_version} />
-              <MetricBlock label={t(lang, "trainingWindow")} value={windowLabel} />
-              <MetricBlock
-                label={t(lang, "validationPositiveEvents")}
-                value={crisisWarning.diagnostics.validation_positive_events.toLocaleString()}
-                detail={validationDetail}
-              />
-              <MetricBlock
-                label={t(lang, "positiveRate")}
-                value={formatPercent(crisisWarning.diagnostics.positive_rate, 2)}
-                detail={byLang(lang, "Tail-event frequency in training rows.", "训练样本尾部事件频率。", "訓練樣本尾部事件頻率。")}
-              />
-            </div>
-            {(warnings.length > 0 || fallbackUsed) && (
-              <div className="mt-4 border-t border-black/[0.07] pt-4 dark:border-white/[0.08]">
-                <div className="mb-2 text-[11px] font-semibold uppercase text-df-text-secondary">
-                  {t(lang, "diagnosticsWarnings")}
-                </div>
-                <div className="flex flex-col items-start gap-2">
-                  {fallbackUsed && (
-                    <span className="inline-block max-w-full break-words rounded-full border border-amber-300/50 bg-amber-400/10 px-4 py-2 text-sm leading-relaxed text-amber-700 dark:text-amber-200">
-                      {t(lang, "shapFallback")}
-                    </span>
-                  )}
-                  {warnings.map((warning) => (
-                    <span
-                      key={warning}
-                      className="inline-block max-w-full break-words rounded-full border border-df-border bg-df-surface-solid/20 px-4 py-2 text-sm leading-relaxed text-df-text-secondary"
-                    >
-                      {localizeWarning(warning, lang)}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </Panel>
-
-        <Panel className="h-full">
-          <div className="p-4 sm:p-5 xl:p-8">
-            <SectionTitle icon={Info} title={t(lang, "crisisHowToRead")} />
-            <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
-              {readoutMetrics.map((metric) => (
-                <ReadingMetric
-                  key={metric.label}
-                  icon={metric.icon}
-                  label={metric.label}
-                  value={metric.value}
-                  detail={metric.detail}
-                  tone={metric.tone}
+                <CrisisGauge
+                  value={crisisWarning.crisis_probability}
+                  detail={probabilityDetail}
+                  tone={tone}
                 />
-              ))}
+              </div>
+
+              <div className="grid content-center gap-5 sm:grid-cols-3">
+                <SummaryTile
+                  icon={Target}
+                  label={byLang(lang, "Prediction window", "预测窗口", "預測窗口")}
+                  value={`${crisisWarning.horizon}D`}
+                  tone="accent"
+                />
+                <SummaryTile
+                  icon={ShieldCheck}
+                  label={byLang(lang, "Model confidence", "模型可信度", "模型可信度")}
+                  value={confidence.label}
+                  tone={confidence.tone}
+                />
+                <SummaryTile
+                  icon={Gauge}
+                  label={t(lang, "probabilityCalibration")}
+                  value={calibrationLabel}
+                  tone={crisisWarning.diagnostics.probability_calibrated ? "good" : "neutral"}
+                  detail={globalArtifactLabel(crisisWarning.diagnostics.is_global_complete, lang)}
+                />
+              </div>
             </div>
-            <div className="mt-8 grid gap-x-8 gap-y-6 lg:grid-cols-3">
-              <ReadingPoint icon={Target} title={t(lang, "targetDefinition")} tone="accent">
-                <p>{localizedTargetDefinition}</p>
-              </ReadingPoint>
-              <ReadingPoint icon={Gauge} title={t(lang, "validationSummary")} tone={confidence.tone}>
-                <p>{confidence.detail}</p>
-              </ReadingPoint>
-              <ReadingPoint icon={AlertTriangle} title={t(lang, "crisisLimitations")} tone="warn">
-                <p>
-                  {byLang(
-                    lang,
-                    "No return forecast. No automatic allocation change.",
-                    "不预测收益，也不自动改配置。",
-                    "不預測收益，也不自動改配置。"
-                  )}
-                </p>
-              </ReadingPoint>
+          </div>
+        </div>
+        <div className="px-4 pb-4 sm:px-5 xl:px-6 xl:pb-5">
+          <ProbabilityComparisonRail
+            probability={crisisWarning.crisis_probability}
+            baseRate={crisisWarning.diagnostics.positive_rate}
+            lang={lang}
+          />
+        </div>
+      </Panel>
+
+      <div className="grid items-stretch gap-3 xl:grid-cols-[minmax(0,0.65fr)_minmax(24rem,0.35fr)]">
+        <Panel className="h-full">
+          <div className="flex h-full flex-col p-4 sm:p-5 xl:p-6">
+            <SectionTitle
+              icon={BarChart3}
+              title={byLang(lang, "Evidence board", "证据面板", "證據面板")}
+              right={<EvidenceLegend unitLabel={contributionUnit} lang={lang} />}
+            />
+            <div className="grid min-w-0 flex-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(14rem,0.34fr)]">
+              <EvidenceBoardChart
+                drivers={chartDrivers}
+                riskDriverCount={visibleRiskDrivers.length}
+                fallbackUsed={fallbackUsed}
+                lang={lang}
+              />
+              <ContributionRanking
+                drivers={chartDrivers}
+                lang={lang}
+                fallbackUsed={fallbackUsed}
+              />
             </div>
           </div>
         </Panel>
+
+        <ModelReliabilityPanel
+          result={crisisWarning}
+          confidence={confidence}
+          validationStatusLabel={validationStatusLabel}
+          validationStatusTone={validationStatusTone}
+          calibrationLabel={calibrationLabel}
+          coveredScopeLabel={coveredScopeLabel}
+          globalArtifactTone={globalArtifactTone}
+          onOpenAudit={() => setAuditOpen(true)}
+          lang={lang}
+        />
       </div>
 
-      <div className="flex items-start gap-2 rounded-lg border border-black/[0.07] bg-white/55 px-3.5 py-2.5 text-xs leading-relaxed text-df-text-secondary backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.035]">
-        <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-df-accent" />
-        <span>{t(lang, "crisisNoAdviceDisclosure")}</span>
-      </div>
+      {(degradedWarning || warnings.length > 0 || fallbackUsed) && (
+        <DiagnosticsWarningPanel
+          mainMessage={degradedWarning}
+          warnings={warnings}
+          fallbackUsed={fallbackUsed}
+          lang={lang}
+        />
+      )}
+
+      <Panel className="overflow-hidden">
+        <div className="grid divide-y divide-black/[0.08] dark:divide-white/[0.08] lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+          <FooterNotice icon={Target} tone="accent">
+            {byLang(
+              lang,
+              `Crisis probability only indicates ${crisisWarning.horizon}D tail-event risk and does not forecast returns.`,
+              `危机概率只表示未来 ${crisisWarning.horizon}D 尾部事件风险，不预测收益。`,
+              `危機概率只表示未來 ${crisisWarning.horizon}D 尾部事件風險，不預測收益。`
+            )}
+          </FooterNotice>
+          <FooterNotice icon={AlertTriangle} tone="warn">
+            {byLang(
+              lang,
+              "When validation is degraded, use the signal as weak context only.",
+              "验证降级时，只能作为弱信号参考。",
+              "驗證降級時，只能作為弱訊號參考。"
+            )}
+          </FooterNotice>
+          <FooterNotice icon={CheckCircle2} tone="good">
+            {byLang(
+              lang,
+              "Decisions still need ES, anomaly checks, and market regime confirmation.",
+              "决策需结合 ES、异常检测、市场状态，不自动建议买卖。",
+              "決策需結合 ES、異常檢測、市場狀態，不自動建議買賣。"
+            )}
+          </FooterNotice>
+        </div>
+      </Panel>
+
+      <TechnicalAuditModal
+        open={auditOpen}
+        onClose={() => setAuditOpen(false)}
+        result={crisisWarning}
+        requiredScopeLabel={requiredScopeLabel}
+        coveredScopeLabel={coveredScopeLabel}
+        skippedScopeLabel={skippedScopeLabel}
+        validationDetail={validationDetail}
+        windowLabel={windowLabel}
+        lang={lang}
+      />
     </div>
   );
 }
